@@ -5,7 +5,7 @@ chat.py — Full chat UI with ALL production features:
   - Thumbs up / Thumbs down feedback
   - Follow-up question suggestions
   - Conversation memory (last 5 turns sent to LLM)
-  - Multi-language support (EN, Tamil, Hindi)
+  - Multi-language support (EN, Tamil, Hindi, Tanglish, Hinglish)
   - Export full conversation as PDF
   - Telegram share
   - Rate limiting guard
@@ -47,12 +47,32 @@ FOLLOWUP_PROMPTS = {
         "मुख्य बिंदु क्या हैं?",
         "इसके लिए किससे संपर्क करें?",
     ],
+    "tanglish": [
+        "Innum konjam explain pannunga?",
+        "Main points enna sollu?",
+        "Yaarukku contact pannanum?",
+        "Deadline irukka?",
+    ],
+    "hinglish": [
+        "Thoda aur explain karo?",
+        "Main points kya hain?",
+        "Kisse contact karna hai?",
+        "Koi deadline hai kya?",
+    ],
 }
 
 LANG_PROMPTS = {
-    "en": "Answer in English.",
+    "en": "Answer in clear English.",
     "ta": "Answer in Tamil (தமிழில் பதில் சொல்லவும்).",
     "hi": "Answer in Hindi (हिंदी में जवाब दीजिए).",
+    "tanglish": """Answer in Tanglish — the natural mix of Tamil and English spoken by students in Tamil Nadu colleges.
+Use Tamil words naturally mixed with English, just like a friend would talk.
+Example style: 'Attendance 75% maintain pannanum, illa na exam ku allow pannala. Documents submit panna deadline next week iruku.'
+Do NOT write in pure Tamil script. Write Tamil words in English letters mixed with English words.""",
+    "hinglish": """Answer in Hinglish — the natural mix of Hindi and English spoken by students across India.
+Use Hindi words naturally mixed with English, just like a friend would talk.
+Example style: 'Attendance 75% rakhna zaroori hai, warna exam mein allow nahi karenge. Documents submit karne ka deadline next week hai.'
+Do NOT write in pure Hindi/Devanagari script. Write Hindi words in English letters mixed with English words.""",
 }
 
 
@@ -411,7 +431,11 @@ def render_chat(pg_url: str, api_key: str, model):
         if(window._rec) {{ try{{window._rec.stop();}}catch(e){{}} }}
         const rec=new SR();
         window._rec=rec;
-        rec.lang='en-IN'; rec.interimResults=true; rec.continuous=true; rec.maxAlternatives=1;
+        // Map language to speech recognition locale
+        // Tanglish/Hinglish use en-IN (they speak mixed English), Tamil=ta-IN, Hindi=hi-IN
+        const _langMap = {{en:'en-US',ta:'ta-IN',hi:'hi-IN',tanglish:'en-IN',hinglish:'en-IN'}};
+        rec.lang = _langMap['{lang}'] || 'en-IN';
+        rec.interimResults=true; rec.continuous=true; rec.maxAlternatives=1;
         const liveEl=window.parent.document.getElementById('chat-voice-text');
         rec.onstart=()=>{{if(liveEl) liveEl.textContent='Listening — speak now...';}};
         rec.onresult=(e)=>{{

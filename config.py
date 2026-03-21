@@ -30,7 +30,7 @@ SUGGESTIONS = [
     "What are the library timings?",
 ]
 
-LANGUAGES = {"en": "English", "ta": "Tamil", "hi": "Hindi"}
+LANGUAGES = {"en": "English", "ta": "Tamil", "hi": "Hindi", "tanglish": "Tanglish", "hinglish": "Hinglish"}
 
 SESSION_TIMEOUT_MINUTES = 30
 
