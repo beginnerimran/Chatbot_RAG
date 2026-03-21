@@ -1,18 +1,5 @@
 """
-app.py — Main entry point for the College AI Assistant.
-
-Run with:
-    streamlit run app.py
-
-Project structure:
-    app.py            ← Entry point (this file)
-    config.py         ← Page config, CSS, constants
-    database.py       ← All PostgreSQL operations
-    auth.py           ← Login, session tokens, RBAC
-    rag.py            ← PDF extraction, semantic search, LLM
-    sidebar.py        ← Sidebar UI
-    chat.py           ← Chat UI, mic fix, PDF export, WhatsApp
-    ui_components.py  ← Docs panel, user management, change password
+app.py — Main entry point. Run: streamlit run app.py
 """
 
 import streamlit as st
@@ -28,60 +15,60 @@ from ui_components import render_docs_panel, render_user_management, render_chan
 
 def load_secrets():
     try:
-        pg_url  = st.secrets["PG_URL"]
-        api_key = st.secrets["GROQ_API_KEY"]
-        return pg_url, api_key
+        return st.secrets["PG_URL"], st.secrets["GROQ_API_KEY"]
     except KeyError as e:
-        st.error(f"❌ Missing secret: {e}. Add PG_URL and GROQ_API_KEY to .streamlit/secrets.toml")
+        st.error(f"Missing secret: {e}. Add PG_URL and GROQ_API_KEY to .streamlit/secrets.toml")
         st.stop()
     except Exception as e:
-        st.error(f"❌ Could not load secrets: {e}")
+        st.error(f"Could not load secrets: {e}")
         st.stop()
 
 
 def main():
     setup_page()
-
     pg_url, api_key = load_secrets()
 
-    # ── Init DB once per cold start ──
+    # Init DB once
     if not st.session_state.get('db_initialised'):
         if init_db(pg_url):
             st.session_state.db_initialised = True
         else:
-            st.error("❌ Could not connect to the database. Check PG_URL in secrets.toml.")
+            st.error("Could not connect to the database. Check PG_URL in secrets.toml.")
             st.stop()
 
-    # ── Restore session from URL token on refresh ──
+    # Restore session from URL token
     restore_session(pg_url)
 
     if not st.session_state.get('authenticated'):
         render_login(pg_url)
         return
 
-    # ── Load semantic model ──
     model = load_semantic_model()
     user  = st.session_state.user
     role  = user['role']
 
-    # ── Sidebar ──
+    # Sidebar
     render_sidebar(pg_url, api_key, model)
 
-    # ── App header ──
+    # Clean professional header — no slashes, no copy-link icons
     st.markdown(f"""
     <div class="app-header">
-        <h1>🎓 College AI Assistant</h1>
-        <p>// SRM CS Dept &nbsp;|&nbsp;
-           <span class="role-badge role-{role}">{role}</span> &nbsp;{user['display']}
-        </p>
+        <div class="app-header-title">
+            🎓 College AI Assistant
+        </div>
+        <div class="app-header-meta">
+            <span style="color:var(--text-3)">SRM Institute · CS Dept</span>
+            <span class="role-badge role-{role}">{role}</span>
+            <span style="color:var(--text-2);font-weight:500;">{user['display']}</span>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Mobile bottom nav ──
+    # Mobile bottom nav
     active_tab = st.query_params.get("tab", "chat")
-    nav_items  = [("💬", "Chat", "chat"), ("📚", "Docs", "docs"), ("🔑", "Account", "account")]
+    nav_items  = [("💬","Chat","chat"),("📚","Docs","docs"),("🔑","Account","account")]
     if role == "admin":
-        nav_items = [("💬", "Chat", "chat"), ("📚", "Docs", "docs"), ("👥", "Users", "users"), ("🔑", "Account", "account")]
+        nav_items = [("💬","Chat","chat"),("📚","Docs","docs"),("👥","Users","users"),("🔑","Account","account")]
 
     nav_html = '<div class="bottom-nav">'
     for icon, label, key in nav_items:
@@ -94,7 +81,7 @@ def main():
     nav_html += '</div>'
     st.markdown(nav_html, unsafe_allow_html=True)
 
-    # ── Tabs ──
+    # Tabs
     if role == "admin":
         tabs    = st.tabs(["💬 Chat", "📚 Docs", "👥 Users", "🔑 Account"])
         tab_map = {"chat": 0, "docs": 1, "users": 2, "account": 3}
@@ -104,10 +91,8 @@ def main():
 
     with tabs[tab_map["chat"]]:
         render_chat(pg_url, api_key, model)
-
     with tabs[tab_map["docs"]]:
         render_docs_panel(pg_url, role)
-
     if role == "admin":
         with tabs[tab_map["users"]]:
             render_user_management(pg_url, user['username'])
