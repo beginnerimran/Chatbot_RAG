@@ -22,7 +22,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from auth import check_permission
-from config import SUGGESTIONS, LANGUAGES
+from config import SUGGESTIONS
 from database import (
     load_all_documents_from_db, log_query, save_chat_message,
     save_feedback, check_rate_limit, update_last_active
@@ -30,50 +30,24 @@ from database import (
 from rag import compute_confidence, confidence_html, generate_answer, semantic_search
 
 
-FOLLOWUP_PROMPTS = {
-    "en": [
-        "Can you explain that in more detail?",
-        "What are the key points?",
-        "Who should I contact for this?",
-        "Is there a deadline for this?",
-    ],
-    "ta": [
-        "இதை விவரமாக சொல்லுங்கள்",
-        "முக்கிய புள்ளிகள் என்ன?",
-        "யாரை தொடர்பு கொள்வது?",
-    ],
-    "hi": [
-        "इसे विस्तार से बताएं",
-        "मुख्य बिंदु क्या हैं?",
-        "इसके लिए किससे संपर्क करें?",
-    ],
-    "tanglish": [
-        "Innum konjam explain pannunga?",
-        "Main points enna sollu?",
-        "Yaarukku contact pannanum?",
-        "Deadline irukka?",
-    ],
-    "hinglish": [
-        "Thoda aur explain karo?",
-        "Main points kya hain?",
-        "Kisse contact karna hai?",
-        "Koi deadline hai kya?",
-    ],
-}
+# Single set of follow-up chips — language agnostic, AI auto-detects
+FOLLOWUP_PROMPTS = [
+    "Can you explain that in more detail?",
+    "What are the key points?",
+    "Who should I contact for this?",
+    "Is there a deadline for this?",
+]
 
-LANG_PROMPTS = {
-    "en": "Answer in clear English.",
-    "ta": "Answer in Tamil (தமிழில் பதில் சொல்லவும்).",
-    "hi": "Answer in Hindi (हिंदी में जवाब दीजिए).",
-    "tanglish": """Answer in Tanglish — the natural mix of Tamil and English spoken by students in Tamil Nadu colleges.
-Use Tamil words naturally mixed with English, just like a friend would talk.
-Example style: 'Attendance 75% maintain pannanum, illa na exam ku allow pannala. Documents submit panna deadline next week iruku.'
-Do NOT write in pure Tamil script. Write Tamil words in English letters mixed with English words.""",
-    "hinglish": """Answer in Hinglish — the natural mix of Hindi and English spoken by students across India.
-Use Hindi words naturally mixed with English, just like a friend would talk.
-Example style: 'Attendance 75% rakhna zaroori hai, warna exam mein allow nahi karenge. Documents submit karne ka deadline next week hai.'
-Do NOT write in pure Hindi/Devanagari script. Write Hindi words in English letters mixed with English words.""",
-}
+# Auto language detection instruction — no manual selection needed
+LANG_AUTO_INSTRUCTION = """LANGUAGE RULE (VERY IMPORTANT):
+Detect the language of the student question and reply in the SAME language and style.
+- If they wrote in English → reply in English
+- If they wrote in Tamil script → reply in Tamil
+- If they wrote in Hindi/Devanagari → reply in Hindi
+- If they wrote in Tanglish (Tamil words in English letters like "sollu", "pannanum", "iruku") → reply in Tanglish the same way
+- If they wrote in Hinglish (Hindi words in English letters like "karo", "chahiye", "batao") → reply in Hinglish the same way
+- If they wrote in mixed language → match their exact mix
+Never switch language on your own. Always mirror the student's language."""
 
 
 # ─────────────────────────────────────────────
@@ -206,7 +180,7 @@ def _action_row(answer: str, msg_index: int, question: str, username: str, pg_ur
 # FOLLOW-UP SUGGESTIONS
 # ─────────────────────────────────────────────
 def _followup_chips(msg_index: int, lang: str = "en"):
-    chips = FOLLOWUP_PROMPTS.get(lang, FOLLOWUP_PROMPTS["en"])
+    chips = FOLLOWUP_PROMPTS
     chip_html = "".join([
         f'<span class="followup-chip" onclick="setQuery(\'{c.replace(chr(39), chr(34))}\')">{c}</span>'
         for c in chips
@@ -236,7 +210,6 @@ def _followup_chips(msg_index: int, lang: str = "en"):
 def render_chat(pg_url: str, api_key: str, model):
     user = st.session_state.user
     role = user['role']
-    lang = st.session_state.get('language', user.get('language', 'en'))
 
     # Update last active (session timeout tracking)
     update_last_active(pg_url, user['username'])
@@ -305,7 +278,7 @@ def render_chat(pg_url: str, api_key: str, model):
             # Action row + follow-ups for each AI message
             prev_user = st.session_state.messages[i-1]['content'] if i > 0 else ""
             _action_row(msg['content'], i, prev_user, user['username'], pg_url)
-            _followup_chips(i, lang)
+            _followup_chips(i)
 
     # Suggestion chips (empty state)
     if not st.session_state.messages:
@@ -347,15 +320,14 @@ def render_chat(pg_url: str, api_key: str, model):
     with col_input:
         prompt = st.chat_input("Ask about your college documents...") or pending
 
-    # Controls row
+    # Controls row — no manual language selector, AI auto-detects language
     tts_on = st.session_state.get('tts_enabled', True)
-    c1, c2, c3 = st.columns([2, 2, 2])
+    c1, c2 = st.columns([2, 2])
     with c1:
         if st.button("🔊 Read Aloud: ON" if tts_on else "🔇 Read Aloud: OFF", key="tts_toggle", use_container_width=True):
             st.session_state.tts_enabled = not tts_on
             st.rerun()
     with c2:
-        # Export full conversation
         if st.session_state.messages:
             mime, ext = _pdf_type()
             conv_pdf  = export_conversation_pdf(st.session_state.messages, user['username'])
@@ -367,16 +339,6 @@ def render_chat(pg_url: str, api_key: str, model):
                 key="export_conv",
                 use_container_width=True,
             )
-    with c3:
-        # Language selector
-        lang_options = list(LANGUAGES.keys())
-        lang_labels  = list(LANGUAGES.values())
-        cur_idx      = lang_options.index(lang) if lang in lang_options else 0
-        selected     = st.selectbox("🌐 Language", lang_labels, index=cur_idx, key="lang_select", label_visibility="collapsed")
-        new_lang     = lang_options[lang_labels.index(selected)]
-        if new_lang != lang:
-            st.session_state.language = new_lang
-            st.rerun()
 
     # STT + TTS JS
     mic_toggle_id = st.session_state.get('mic_toggle_count', 0)
@@ -483,7 +445,7 @@ def render_chat(pg_url: str, api_key: str, model):
     # Show user message immediately
     now = datetime.now().strftime("%H:%M · %d %b %Y")
     st.session_state.messages.append({"role":"user","content":prompt,"sources":None,"confidence":None,"time":now})
-    save_chat_message(pg_url, user['username'], "user", prompt, language=lang)
+    save_chat_message(pg_url, user['username'], "user", prompt)
     st.markdown(f"""
     <div class="chat-wrap">
         <div class="chat-label">You</div>
@@ -522,7 +484,7 @@ def render_chat(pg_url: str, api_key: str, model):
         answer, success = generate_answer(
             prompt, relevant_docs, api_key,
             memory_context=memory_ctx,
-            lang_instruction=LANG_PROMPTS.get(lang, "")
+            lang_instruction=LANG_AUTO_INSTRUCTION
         )
     else:
         answer  = "No relevant information found in the uploaded documents. Please ask an admin to upload more documents."
@@ -534,9 +496,9 @@ def render_chat(pg_url: str, api_key: str, model):
     # Remove typing indicator
     typing_placeholder.empty()
 
-    log_query(pg_url, user['username'], prompt, ms, confidence, success, lang)
+    log_query(pg_url, user['username'], prompt, ms, confidence, success)
     sources_json = json.dumps(relevant_docs[:3]) if relevant_docs else None
-    save_chat_message(pg_url, user['username'], "assistant", answer, sources_json, confidence, lang)
+    save_chat_message(pg_url, user['username'], "assistant", answer, sources_json, confidence)
 
     ai_msg = {"role":"assistant","content":answer,"sources":sources_json,"confidence":confidence,"time":now}
     st.session_state.messages.append(ai_msg)
@@ -560,7 +522,7 @@ def render_chat(pg_url: str, api_key: str, model):
 
     idx = len(st.session_state.messages) - 1
     _action_row(answer, idx, prompt, user['username'], pg_url)
-    _followup_chips(idx, lang)
+    _followup_chips(idx)
 
     if remaining <= 5:
         st.markdown(f'<div class="alert-warn">⚠️ You have {remaining} queries left this hour.</div>', unsafe_allow_html=True)
