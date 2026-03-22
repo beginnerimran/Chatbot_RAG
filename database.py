@@ -1,7 +1,13 @@
 """
 database.py — All PostgreSQL database operations.
-Tables: users, documents, chat_history, query_log,
-        feedback, rate_limit, notifications, doc_categories
+FIXES:
+  - get_db_connection() called st.error() which crashed when invoked from sidebar/background
+    threads — replaced with silent return None + print to terminal
+  - load_all_documents_from_db st.error() inside except removed — was crashing safe_render
+  - save_document_to_db st.error() removed for same reason
+  - delete_document st.error() removed
+  - get_stats: AVG(confidence) returns None when table empty — guarded with COALESCE
+  - db_authenticate: username lookup was case-sensitive — normalised to lower() on both sides
 """
 
 import hashlib
@@ -20,13 +26,17 @@ from config import SEED_USERS
 
 # ─────────────────────────────────────────────
 # CONNECTION
+# FIX: no st.error() here — this is called from sidebar, background, etc.
 # ─────────────────────────────────────────────
 def get_db_connection(pg_url: str):
     try:
         conn = psycopg2.connect(pg_url, connect_timeout=10)
         return conn
     except OperationalError as e:
-        st.error(f"Database connection failed: {e}")
+        print(f"[DB] Connection failed: {e}")
+        return None
+    except Exception as e:
+        print(f"[DB] Unexpected connection error: {e}")
         return None
 
 
@@ -39,7 +49,6 @@ def init_db(pg_url: str) -> bool:
         return False
     try:
         with conn.cursor() as cur:
-            # Users
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -54,13 +63,12 @@ def init_db(pg_url: str) -> bool:
                     created_at TIMESTAMP DEFAULT NOW()
                 );
             """)
-            # Safe migration: add new columns to existing tables
             migrations = [
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMP DEFAULT NOW()",
-                "UPDATE users SET onboarded=TRUE WHERE onboarded IS NULL OR onboarded=FALSE",
+                "UPDATE users SET onboarded=TRUE WHERE onboarded IS NULL",
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General'",
                 "ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'",
                 "ALTER TABLE query_log ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'",
@@ -68,8 +76,9 @@ def init_db(pg_url: str) -> bool:
             for m in migrations:
                 try:
                     cur.execute(m)
+                    conn.commit()
                 except Exception:
-                    pass
+                    conn.rollback()
 
             cur.execute("SELECT COUNT(*) FROM users")
             if cur.fetchone()[0] == 0:
@@ -79,7 +88,6 @@ def init_db(pg_url: str) -> bool:
                         VALUES (%s,%s,%s,%s,TRUE) ON CONFLICT (username) DO NOTHING
                     """, (uname, phash, role, display))
 
-            # Document categories
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS doc_categories (
                     id SERIAL PRIMARY KEY,
@@ -93,7 +101,6 @@ def init_db(pg_url: str) -> bool:
                             ("Rules","#f0a500"),("Timetable","#0ea472"),("General","#8b92a9")]:
                     cur.execute("INSERT INTO doc_categories (name,color) VALUES (%s,%s) ON CONFLICT DO NOTHING", cat)
 
-            # Documents
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS documents (
                     id SERIAL PRIMARY KEY,
@@ -107,8 +114,6 @@ def init_db(pg_url: str) -> bool:
                     category TEXT DEFAULT 'General'
                 );
             """)
-
-            # Chat history
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chat_history (
                     id SERIAL PRIMARY KEY,
@@ -121,8 +126,6 @@ def init_db(pg_url: str) -> bool:
                     created_at TIMESTAMP DEFAULT NOW()
                 );
             """)
-
-            # Query log
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS query_log (
                     id SERIAL PRIMARY KEY,
@@ -135,8 +138,6 @@ def init_db(pg_url: str) -> bool:
                     created_at TIMESTAMP DEFAULT NOW()
                 );
             """)
-
-            # Feedback (thumbs up/down)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS feedback (
                     id SERIAL PRIMARY KEY,
@@ -147,8 +148,6 @@ def init_db(pg_url: str) -> bool:
                     created_at TIMESTAMP DEFAULT NOW()
                 );
             """)
-
-            # Rate limiting
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS rate_limit (
                     id SERIAL PRIMARY KEY,
@@ -157,8 +156,6 @@ def init_db(pg_url: str) -> bool:
                     window_start TIMESTAMP DEFAULT NOW()
                 );
             """)
-
-            # Notifications
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS notifications (
                     id SERIAL PRIMARY KEY,
@@ -169,11 +166,14 @@ def init_db(pg_url: str) -> bool:
                     created_at TIMESTAMP DEFAULT NOW()
                 );
             """)
-
         conn.commit()
         return True
     except DatabaseError as e:
-        st.error(f"DB init error: {e}")
+        print(f"[DB] init_db error: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False
     finally:
         conn.close()
@@ -188,15 +188,14 @@ def db_authenticate(pg_url: str, username: str, password: str) -> Optional[dict]
         return None
     try:
         phash = hashlib.sha256(password.encode()).hexdigest()
+        uname = username.strip().lower()
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            # Only select core columns that always exist
             cur.execute(
-                "SELECT username,role,display_name FROM users WHERE username=%s AND password_hash=%s",
-                (username.strip().lower(), phash)
+                "SELECT username,role,display_name FROM users WHERE LOWER(username)=%s AND password_hash=%s",
+                (uname, phash)
             )
             row = cur.fetchone()
             if row:
-                # Safely get optional columns (may not exist on older DBs)
                 email, language, onboarded = None, "en", True
                 try:
                     cur.execute("SELECT email,language,onboarded FROM users WHERE username=%s", (row["username"],))
@@ -250,17 +249,18 @@ def add_user(pg_url: str, username: str, password: str, role: str,
         phash = hashlib.sha256(password.encode()).hexdigest()
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO users (username,password_hash,role,display_name,email) VALUES (%s,%s,%s,%s,%s)",
+                "INSERT INTO users (username,password_hash,role,display_name,email,onboarded) VALUES (%s,%s,%s,%s,%s,FALSE)",
                 (username.strip().lower(), phash, role, display_name.strip(), email.strip())
             )
         conn.commit()
-        # Notify new user
         add_notification(pg_url, username.strip().lower(),
                          f"Welcome to College AI Assistant, {display_name}!", "success")
         return True, "User created successfully."
     except psycopg2.errors.UniqueViolation:
+        conn.rollback()
         return False, f"Username '{username}' already exists."
     except DatabaseError as e:
+        conn.rollback()
         return False, str(e)
     finally:
         conn.close()
@@ -282,6 +282,7 @@ def delete_user(pg_url: str, user_id: int, current_username: str) -> Tuple[bool,
         conn.commit()
         return True, "User deleted."
     except DatabaseError as e:
+        conn.rollback()
         return False, str(e)
     finally:
         conn.close()
@@ -305,6 +306,7 @@ def change_password(pg_url: str, username: str, old_password: str,
         conn.commit()
         return True, "Password changed successfully."
     except DatabaseError as e:
+        conn.rollback()
         return False, str(e)
     finally:
         conn.close()
@@ -354,6 +356,7 @@ def update_last_active(pg_url: str, username: str):
 
 # ─────────────────────────────────────────────
 # DOCUMENTS
+# FIX: removed st.error() calls — these crash when called inside safe_render
 # ─────────────────────────────────────────────
 def save_document_to_db(pg_url: str, filename: str, username: str,
                         chunks: List[str], embeddings: np.ndarray,
@@ -373,11 +376,14 @@ def save_document_to_db(pg_url: str, filename: str, username: str,
                   psycopg2.Binary(chunks_blob), psycopg2.Binary(embeddings_blob),
                   used_ocr, category))
         conn.commit()
-        # Notify all students
         _notify_all_students(pg_url, f"New document uploaded: {filename} ({category})")
         return True
     except DatabaseError as e:
-        st.error(f"Failed to save document: {e}")
+        print(f"[DB] Failed to save document: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False
     finally:
         conn.close()
@@ -403,27 +409,38 @@ def _notify_all_students(pg_url: str, message: str):
 
 
 def load_all_documents_from_db(pg_url: str):
+    """Returns (embeddings_array, chunks_list, doc_list) or (None, [], []) on failure."""
     conn = get_db_connection(pg_url)
     if not conn:
-        return None, None, []
+        return None, [], []
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute("SELECT filename,chunk_count,chunks_blob,embeddings_blob,used_ocr,category FROM documents ORDER BY uploaded_at")
             rows = cur.fetchall()
         if not rows:
-            return None, None, []
+            return None, [], []
         all_chunks, all_embeddings, doc_list = [], [], []
         for row in rows:
-            chunks     = pickle.loads(bytes(row['chunks_blob']))
-            embeddings = pickle.loads(bytes(row['embeddings_blob']))
-            all_chunks.extend(chunks)
-            all_embeddings.append(embeddings)
-            doc_list.append({"filename":row['filename'],"chunks":row['chunk_count'],
-                             "used_ocr":row['used_ocr'],"category":row['category']})
+            try:
+                chunks     = pickle.loads(bytes(row['chunks_blob']))
+                embeddings = pickle.loads(bytes(row['embeddings_blob']))
+                all_chunks.extend(chunks)
+                all_embeddings.append(embeddings)
+                doc_list.append({
+                    "filename": row['filename'],
+                    "chunks":   row['chunk_count'],
+                    "used_ocr": row['used_ocr'],
+                    "category": row['category'] or 'General'
+                })
+            except Exception as e:
+                print(f"[DB] Skipping corrupt document row: {e}")
+                continue
+        if not all_embeddings:
+            return None, [], doc_list
         return np.vstack(all_embeddings), all_chunks, doc_list
     except Exception as e:
-        st.error(f"Failed to load documents: {e}")
-        return None, None, []
+        print(f"[DB] load_all_documents_from_db error: {e}")
+        return None, [], []
     finally:
         conn.close()
 
@@ -452,7 +469,11 @@ def delete_document(pg_url: str, doc_id: int) -> bool:
         conn.commit()
         return True
     except DatabaseError as e:
-        st.error(f"Delete failed: {e}")
+        print(f"[DB] Delete document failed: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False
     finally:
         conn.close()
@@ -553,15 +574,16 @@ def get_stats(pg_url: str) -> dict:
         return {}
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM documents");         docs     = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM query_log");         queries  = cur.fetchone()[0]
-            cur.execute("SELECT SUM(chunk_count) FROM documents"); chunks   = cur.fetchone()[0] or 0
-            cur.execute("SELECT AVG(confidence) FROM query_log WHERE confidence IS NOT NULL"); avg_c = cur.fetchone()[0] or 0
-            cur.execute("SELECT COUNT(*) FROM users");             users    = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM feedback");          feedback = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM documents");            docs      = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM query_log");            queries   = cur.fetchone()[0]
+            cur.execute("SELECT COALESCE(SUM(chunk_count),0) FROM documents"); chunks = cur.fetchone()[0]
+            # FIX: COALESCE so AVG never returns None on empty table
+            cur.execute("SELECT COALESCE(AVG(confidence),0) FROM query_log WHERE confidence IS NOT NULL"); avg_c = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM users");                users     = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM feedback");             feedback  = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM feedback WHERE rating=1"); thumbs_up = cur.fetchone()[0]
         return {"docs":docs,"queries":queries,"chunks":chunks,
-                "avg_conf":round(float(avg_c)*100,1),"users":users,
+                "avg_conf":round(float(avg_c)*100, 1),"users":users,
                 "feedback":feedback,"thumbs_up":thumbs_up}
     except DatabaseError:
         return {}
@@ -615,9 +637,9 @@ def get_avg_response_time(pg_url: str) -> float:
         return 0.0
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT AVG(response_time_ms) FROM query_log WHERE success=TRUE")
+            cur.execute("SELECT COALESCE(AVG(response_time_ms),0) FROM query_log WHERE success=TRUE")
             result = cur.fetchone()[0]
-            return round(float(result or 0), 1)
+            return round(float(result), 1)
     except DatabaseError:
         return 0.0
     finally:
@@ -678,10 +700,9 @@ def get_feedback_list(pg_url: str, limit: int = 20) -> list:
 
 
 # ─────────────────────────────────────────────
-# RATE LIMITING (max 30 queries per hour per user)
+# RATE LIMITING
 # ─────────────────────────────────────────────
 def check_rate_limit(pg_url: str, username: str, max_per_hour: int = 30) -> Tuple[bool, int]:
-    """Returns (allowed, remaining)"""
     conn = get_db_connection(pg_url)
     if not conn:
         return True, max_per_hour

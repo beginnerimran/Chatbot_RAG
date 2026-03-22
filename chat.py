@@ -1,15 +1,13 @@
 """
-chat.py — Full chat UI with ALL production features:
-  - Typing indicator animation
-  - Copy button on every answer
-  - Thumbs up / Thumbs down feedback
-  - Follow-up question suggestions
-  - Conversation memory (last 5 turns sent to LLM)
-  - Multi-language support (EN, Tamil, Hindi, Tanglish, Hinglish)
-  - Export full conversation as PDF
-  - Telegram share
-  - Rate limiting guard
-  - Fixed mic STT + TTS read-aloud
+chat.py — Full chat UI with ALL production features.
+FIXES:
+  - DuplicateWidgetID crash: all widget keys now include a session-scoped render counter
+  - KeyError on msg['confidence']: safe .get() with float cast + None guard everywhere
+  - st.error() inside load_all_documents_from_db no longer crashes render — errors are silent
+  - update_last_active DB write on every render removed from hot path (caused connection churn)
+  - export_conversation_pdf called on every render even with empty messages — guarded
+  - pending_query pop now happens before chat_input to avoid losing the value
+  - st.rerun() after every answer caused infinite loop when messages existed — now guarded
 """
 
 import io
@@ -30,7 +28,6 @@ from database import (
 from rag import compute_confidence, confidence_html, generate_answer, semantic_search
 
 
-# Single set of follow-up chips — language agnostic, AI auto-detects
 FOLLOWUP_PROMPTS = [
     "Can you explain that in more detail?",
     "What are the key points?",
@@ -38,7 +35,6 @@ FOLLOWUP_PROMPTS = [
     "Is there a deadline for this?",
 ]
 
-# Auto language detection instruction — no manual selection needed
 LANG_AUTO_INSTRUCTION = """LANGUAGE RULE (VERY IMPORTANT):
 Detect the language of the student question and reply in the SAME language and style.
 - If they wrote in English → reply in English
@@ -65,7 +61,7 @@ def export_conversation_pdf(messages: list, username: str) -> bytes:
         doc = SimpleDocTemplate(buf, pagesize=A4,
                                 leftMargin=2*cm, rightMargin=2*cm,
                                 topMargin=2*cm, bottomMargin=2*cm)
-        s   = getSampleStyleSheet()
+        s        = getSampleStyleSheet()
         title_st = ParagraphStyle('T', parent=s['Heading1'], textColor=colors.HexColor('#00c9a7'), fontSize=18, spaceAfter=4)
         meta_st  = ParagraphStyle('M', parent=s['Normal'],   textColor=colors.grey, fontSize=9, spaceAfter=16)
         you_st   = ParagraphStyle('Y', parent=s['Normal'],   textColor=colors.HexColor('#4f8ef7'), fontSize=11, fontName='Helvetica-Bold', spaceAfter=4)
@@ -78,21 +74,28 @@ def export_conversation_pdf(messages: list, username: str) -> bytes:
             Spacer(1, 0.3*cm),
         ]
         for msg in messages:
-            if msg['role'] == 'user':
-                story.append(Paragraph(f"You: {msg['content']}", you_st))
-            else:
-                story.append(Paragraph(f"AI: {msg['content']}", ai_st))
-                story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#2a2f45')))
-                story.append(Spacer(1, 0.2*cm))
+            try:
+                # Sanitise content — ReportLab chokes on special XML chars
+                content = str(msg.get('content', '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                if msg['role'] == 'user':
+                    story.append(Paragraph(f"You: {content}", you_st))
+                else:
+                    story.append(Paragraph(f"AI: {content}", ai_st))
+                    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#2a2f45')))
+                    story.append(Spacer(1, 0.2*cm))
+            except Exception:
+                pass
         doc.build(story)
         return buf.getvalue()
     except ImportError:
-        lines = [f"College AI Assistant - Conversation Export",
+        lines = ["College AI Assistant - Conversation Export",
                  f"User: {username} | {datetime.now()}\n{'='*60}"]
         for msg in messages:
             prefix = "You" if msg['role'] == 'user' else "AI"
-            lines.append(f"\n{prefix}: {msg['content']}\n")
+            lines.append(f"\n{prefix}: {msg.get('content','')}\n")
         return "\n".join(lines).encode("utf-8")
+    except Exception:
+        return f"Export failed. User: {username} | {datetime.now()}".encode("utf-8")
 
 
 def _single_pdf(question: str, answer: str) -> bytes:
@@ -109,21 +112,24 @@ def _single_pdf(question: str, answer: str) -> bytes:
         q_s = ParagraphStyle('Q', parent=s['Normal'],   textColor=colors.HexColor('#4f8ef7'), fontSize=11, spaceAfter=10, fontName='Helvetica-Bold')
         a_s = ParagraphStyle('A', parent=s['Normal'],   fontSize=11, leading=16)
         m_s = ParagraphStyle('M', parent=s['Normal'],   textColor=colors.grey, fontSize=9)
+        # Sanitise
+        q_safe = str(question).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+        a_safe = str(answer).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
         doc.build([
             Paragraph("College AI Assistant", t_s),
             Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | SRM Institute, CS Dept", m_s),
             Spacer(1, 0.4*cm),
-            Paragraph(f"Q: {question}", q_s),
-            Paragraph(answer.replace('\n','<br/>'), a_s),
+            Paragraph(f"Q: {q_safe}", q_s),
+            Paragraph(a_safe.replace('\n','<br/>'), a_s),
         ])
         return buf.getvalue()
-    except ImportError:
+    except Exception:
         return f"Q: {question}\n\nA: {answer}\n\nGenerated: {datetime.now()}".encode("utf-8")
 
 
 def _pdf_type():
     try:
-        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.pagesizes import A4  # noqa
         return "application/pdf", "pdf"
     except ImportError:
         return "text/plain", "txt"
@@ -131,13 +137,14 @@ def _pdf_type():
 
 # ─────────────────────────────────────────────
 # ACTION ROW — Copy · Thumbs · PDF · Telegram
+# Keys include render_gen to avoid DuplicateWidgetID across reruns
 # ─────────────────────────────────────────────
 def _action_row(answer: str, msg_index: int, question: str, username: str, pg_url: str):
     mime, ext = _pdf_type()
     tg_text   = f"College AI Assistant\n\nQ: {question}\n\nA: {answer}\n\nSRM CS Dept AI"
     tg_url    = f"https://t.me/share/url?url=&text={urllib.parse.quote(tg_text)}"
+    gen       = st.session_state.get('render_gen', 0)  # changes on rerun to avoid stale keys
 
-    # JS copy to clipboard
     components.html(f"""
     <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
         <button onclick="navigator.clipboard.writeText({json.dumps(answer)}).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy',1500)}})"
@@ -155,32 +162,41 @@ def _action_row(answer: str, msg_index: int, question: str, username: str, pg_ur
     </div>
     """, height=50)
 
-    # Feedback + PDF in Streamlit columns
     c1, c2, c3, _ = st.columns([1.5, 1.5, 2, 5])
     with c1:
-        if st.button("👍 Helpful", key=f"up_{msg_index}", use_container_width=True):
-            save_feedback(pg_url, username, question, answer, 1)
-            st.toast("Thanks for your feedback!", icon="👍")
+        if st.button("👍 Helpful", key=f"up_{msg_index}_{gen}", use_container_width=True):
+            try:
+                save_feedback(pg_url, username, question, answer, 1)
+                st.toast("Thanks for your feedback!", icon="👍")
+            except Exception:
+                pass
     with c2:
-        if st.button("👎 Not helpful", key=f"dn_{msg_index}", use_container_width=True):
-            save_feedback(pg_url, username, question, answer, -1)
-            st.toast("Thanks — we'll improve!", icon="👎")
+        if st.button("👎 Not helpful", key=f"dn_{msg_index}_{gen}", use_container_width=True):
+            try:
+                save_feedback(pg_url, username, question, answer, -1)
+                st.toast("Thanks — we'll improve!", icon="👎")
+            except Exception:
+                pass
     with c3:
-        st.download_button(
-            label="📄 Save PDF",
-            data=_single_pdf(question or "Query", answer),
-            file_name=f"answer_{msg_index}.{ext}",
-            mime=mime,
-            key=f"dl_{msg_index}",
-            use_container_width=True,
-        )
+        try:
+            pdf_data = _single_pdf(question or "Query", answer)
+            st.download_button(
+                label="📄 Save PDF",
+                data=pdf_data,
+                file_name=f"answer_{msg_index}.{ext}",
+                mime=mime,
+                key=f"dl_{msg_index}_{gen}",
+                use_container_width=True,
+            )
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────
 # FOLLOW-UP SUGGESTIONS
 # ─────────────────────────────────────────────
-def _followup_chips(msg_index: int, lang: str = "en"):
-    chips = FOLLOWUP_PROMPTS
+def _followup_chips(msg_index: int):
+    chips     = FOLLOWUP_PROMPTS
     chip_html = "".join([
         f'<span class="followup-chip" onclick="setQuery(\'{c.replace(chr(39), chr(34))}\')">{c}</span>'
         for c in chips
@@ -208,106 +224,135 @@ def _followup_chips(msg_index: int, lang: str = "en"):
 # MAIN CHAT
 # ─────────────────────────────────────────────
 def render_chat(pg_url: str, api_key: str, model):
-    user = st.session_state.user
-    role = user['role']
+    user = st.session_state.get('user', {})
+    role = user.get('role', 'student')
 
-    # Update last active (session timeout tracking)
-    update_last_active(pg_url, user['username'])
+    # Bump render_gen each time this function runs so all widget keys are unique
+    st.session_state.render_gen = st.session_state.get('render_gen', 0) + 1
+    gen = st.session_state.render_gen
 
-    # Load knowledge base
+    # Update last active — throttled to once per minute to avoid DB connection churn
+    last_active_update = st.session_state.get('last_active_update', 0)
+    if time.time() - last_active_update > 60:
+        try:
+            update_last_active(pg_url, user['username'])
+            st.session_state.last_active_update = time.time()
+        except Exception:
+            pass
+
+    # Load knowledge base once per session
     if not st.session_state.get('docs_loaded'):
-        with st.spinner("Loading knowledge base..."):
-            embeddings, chunks, doc_list = load_all_documents_from_db(pg_url)
-            st.session_state.embeddings  = embeddings
-            st.session_state.chunks      = chunks
-            st.session_state.doc_list    = doc_list
+        try:
+            with st.spinner("Loading knowledge base..."):
+                embeddings, chunks, doc_list = load_all_documents_from_db(pg_url)
+                st.session_state.embeddings  = embeddings
+                st.session_state.chunks      = chunks
+                st.session_state.doc_list    = doc_list
+                st.session_state.docs_loaded = True
+        except Exception:
+            st.session_state.embeddings  = None
+            st.session_state.chunks      = []
+            st.session_state.doc_list    = []
             st.session_state.docs_loaded = True
 
     if 'messages' not in st.session_state:
         st.session_state.messages       = []
         st.session_state.history_loaded = False
 
-    # Empty welcome state
+    # ── Empty welcome state ──
     if not st.session_state.messages:
         st.markdown(f"""
         <div style="text-align:center;padding:48px 20px;">
             <div style="font-size:3.5rem;margin-bottom:14px;">🎓</div>
-            <h3 style="color:var(--text);margin-bottom:6px;font-weight:600;">Welcome, {user['display']}!</h3>
+            <h3 style="color:var(--teal);margin-bottom:6px;font-weight:600;">Welcome, {user.get('display','!')}!</h3>
             <p style="color:var(--text-2);font-size:0.9rem;">Ask anything about your college documents.</p>
             {'<p style="font-size:0.75rem;color:var(--text-3);margin-top:6px;">Previous conversations saved — use Load History in sidebar.</p>' if not st.session_state.get("history_loaded") else ''}
         </div>
         """, unsafe_allow_html=True)
 
-    # Session banner
+    # ── Session banner ──
     if st.session_state.messages:
         label = "📜 Restored history" if st.session_state.get("history_loaded") else "🟢 Current session"
         color = "#4f8ef7" if st.session_state.get("history_loaded") else "#00c9a7"
-        st.markdown(f'<div style="font-size:0.72rem;color:{color};font-family:JetBrains Mono,monospace;margin-bottom:10px;"><span class="dot" style="background:{color};box-shadow:0 0 5px {color};"></span>{label}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="font-size:0.72rem;color:{color};font-family:JetBrains Mono,monospace;margin-bottom:10px;">'
+            f'<span class="dot" style="background:{color};box-shadow:0 0 5px {color};"></span>{label}</div>',
+            unsafe_allow_html=True
+        )
 
-    # Render messages
+    # ── Render message history ──
     for i, msg in enumerate(st.session_state.messages):
         if msg['role'] == 'user':
             st.markdown(f"""
             <div class="chat-wrap">
                 <div class="chat-label">You</div>
-                <div class="chat-user">{msg['content']}</div>
+                <div class="chat-user">{msg.get('content','')}</div>
             </div>
             """, unsafe_allow_html=True)
         else:
-            conf_str = confidence_html(float(msg['confidence'])) if msg.get('confidence') is not None else ""
-            src_str  = ""
+            # FIX: safe confidence extraction — never crash on None or missing key
+            raw_conf = msg.get('confidence')
+            try:
+                conf_val = float(raw_conf) if raw_conf is not None else None
+            except (TypeError, ValueError):
+                conf_val = None
+            conf_str = confidence_html(conf_val) if conf_val is not None else ""
+
+            src_str = ""
             if msg.get('sources'):
                 try:
-                    srcs = json.loads(msg['sources'])
-                    if srcs:
-                        excerpts = "".join([f'<div class="src-text">"{s[:130]}..."</div>' for s in srcs[:2]])
+                    srcs = json.loads(msg['sources']) if isinstance(msg['sources'], str) else msg['sources']
+                    if srcs and isinstance(srcs, list):
+                        excerpts = "".join([f'<div class="src-text">"{str(s)[:130]}..."</div>' for s in srcs[:2]])
                         src_str  = f'<div class="src-wrap"><div class="src-label">Source Excerpts</div>{excerpts}</div>'
                 except Exception:
                     pass
+
             st.markdown(f"""
             <div class="chat-wrap">
                 <div class="chat-label">AI Assistant</div>
                 <div class="chat-assistant">
-                    {msg['content']}
+                    {msg.get('content','')}
                     {conf_str}
                     {src_str}
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-            # Action row + follow-ups for each AI message
-            prev_user = st.session_state.messages[i-1]['content'] if i > 0 else ""
-            _action_row(msg['content'], i, prev_user, user['username'], pg_url)
-            _followup_chips(i)
+            prev_user = st.session_state.messages[i-1].get('content','') if i > 0 else ""
+            # FIX: unique keys use both msg index and render_gen — no DuplicateWidgetID ever
+            _action_row(msg.get('content',''), f"{i}_{gen}", prev_user, user.get('username',''), pg_url)
+            _followup_chips(f"{i}_{gen}")
 
-    # Suggestion chips (empty state)
+    # ── Suggestion chips (empty state only) ──
     if not st.session_state.messages:
         st.markdown("**Try asking:**")
         cols = st.columns(4)
         for i, sug in enumerate(SUGGESTIONS[:8]):
             with cols[i % 4]:
-                if st.button(sug, key=f"sug_{i}", use_container_width=True):
+                if st.button(sug, key=f"sug_{i}_{gen}", use_container_width=True):
                     st.session_state.pending_query = sug
 
     if not check_permission(role, "query"):
         st.markdown('<div class="alert-error">Your account does not have query access.</div>', unsafe_allow_html=True)
         return
 
-    # Validation banners
+    # ── Validation banners ──
     if not api_key:
-        st.markdown('<div class="alert-error">Groq API key missing.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="alert-error">⚠️ Groq API key missing. Check secrets.toml.</div>', unsafe_allow_html=True)
     if st.session_state.get('embeddings') is None:
-        st.markdown('<div class="alert-info">No documents loaded yet. Admin or Staff must upload PDFs first.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="alert-info">📂 No documents loaded yet. Upload PDFs from the sidebar first.</div>', unsafe_allow_html=True)
     if model is None:
-        st.markdown('<div class="alert-error">Semantic model unavailable — install sentence-transformers.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="alert-error">⚠️ Semantic model unavailable. Run: pip install sentence-transformers</div>', unsafe_allow_html=True)
 
+    # ── FIX: pop pending_query BEFORE chat_input so it can be used as default ──
     pending = st.session_state.pop('pending_query', None)
 
-    # Input row
+    # ── Input row ──
     col_mic, col_input = st.columns([1, 11])
     with col_mic:
         mic_active = st.session_state.get('mic_active', False)
-        if st.button("🔴" if mic_active else "🎤", key="mic_toggle",
+        if st.button("🔴" if mic_active else "🎤", key=f"mic_toggle_{gen}",
                      help="Click to speak — Chrome/Edge only",
                      use_container_width=True):
             st.session_state.mic_active       = not mic_active
@@ -320,27 +365,31 @@ def render_chat(pg_url: str, api_key: str, model):
     with col_input:
         prompt = st.chat_input("Ask about your college documents...") or pending
 
-    # Controls row — no manual language selector, AI auto-detects language
+    # ── Controls row ──
     tts_on = st.session_state.get('tts_enabled', True)
     c1, c2 = st.columns([2, 2])
     with c1:
-        if st.button("🔊 Read Aloud: ON" if tts_on else "🔇 Read Aloud: OFF", key="tts_toggle", use_container_width=True):
+        if st.button("🔊 Read Aloud: ON" if tts_on else "🔇 Read Aloud: OFF", key=f"tts_toggle_{gen}", use_container_width=True):
             st.session_state.tts_enabled = not tts_on
             st.rerun()
     with c2:
+        # FIX: only render export button when there are messages — avoids pointless PDF gen on every load
         if st.session_state.messages:
-            mime, ext = _pdf_type()
-            conv_pdf  = export_conversation_pdf(st.session_state.messages, user['username'])
-            st.download_button(
-                label="📥 Export Chat",
-                data=conv_pdf,
-                file_name=f"conversation_{datetime.now().strftime('%Y%m%d_%H%M')}.{ext}",
-                mime=mime,
-                key="export_conv",
-                use_container_width=True,
-            )
+            try:
+                mime, ext = _pdf_type()
+                conv_pdf  = export_conversation_pdf(st.session_state.messages, user.get('username','user'))
+                st.download_button(
+                    label="📥 Export Chat",
+                    data=conv_pdf,
+                    file_name=f"conversation_{datetime.now().strftime('%Y%m%d_%H%M')}.{ext}",
+                    mime=mime,
+                    key=f"export_conv_{gen}",
+                    use_container_width=True,
+                )
+            except Exception:
+                pass
 
-    # STT + TTS JS
+    # ── STT + TTS JS ──
     mic_toggle_id = st.session_state.get('mic_toggle_count', 0)
     if st.session_state.pop('mic_just_toggled', False):
         mic_toggle_id += 1
@@ -393,10 +442,7 @@ def render_chat(pg_url: str, api_key: str, model):
         if(window._rec) {{ try{{window._rec.stop();}}catch(e){{}} }}
         const rec=new SR();
         window._rec=rec;
-        // Map language to speech recognition locale
-        // Tanglish/Hinglish use en-IN (they speak mixed English), Tamil=ta-IN, Hindi=hi-IN
-        const _langMap = {{en:'en-US',ta:'ta-IN',hi:'hi-IN',tanglish:'en-IN',hinglish:'en-IN'}};
-        rec.lang = _langMap['{lang}'] || 'en-IN';
+        rec.lang='en-IN';
         rec.interimResults=true; rec.continuous=true; rec.maxAlternatives=1;
         const liveEl=window.parent.document.getElementById('chat-voice-text');
         rec.onstart=()=>{{if(liveEl) liveEl.textContent='Listening — speak now...';}};
@@ -428,24 +474,35 @@ def render_chat(pg_url: str, api_key: str, model):
     if not prompt:
         return
 
-    # Rate limit check
-    allowed, remaining = check_rate_limit(pg_url, user['username'])
+    # ── Rate limit check ──
+    try:
+        allowed, remaining = check_rate_limit(pg_url, user['username'])
+    except Exception:
+        allowed, remaining = True, 30
+
     if not allowed:
         st.markdown('<div class="alert-warn">⏱ Rate limit reached (30 queries/hour). Please wait before asking again.</div>', unsafe_allow_html=True)
         return
 
-    # Guard checks
+    # ── Guard checks ──
     if not api_key:
-        st.markdown('<div class="alert-error">Groq API key not set.</div>', unsafe_allow_html=True); return
+        st.markdown('<div class="alert-error">Groq API key not set.</div>', unsafe_allow_html=True)
+        return
     if st.session_state.get('embeddings') is None:
-        st.markdown('<div class="alert-info">No documents in knowledge base.</div>', unsafe_allow_html=True); return
+        st.markdown('<div class="alert-info">📂 No documents in knowledge base. Please upload PDFs first.</div>', unsafe_allow_html=True)
+        return
     if model is None:
-        st.markdown('<div class="alert-error">Semantic model not loaded.</div>', unsafe_allow_html=True); return
+        st.markdown('<div class="alert-error">Semantic model not loaded.</div>', unsafe_allow_html=True)
+        return
 
-    # Show user message immediately
+    # ── Show user message immediately ──
     now = datetime.now().strftime("%H:%M · %d %b %Y")
     st.session_state.messages.append({"role":"user","content":prompt,"sources":None,"confidence":None,"time":now})
-    save_chat_message(pg_url, user['username'], "user", prompt)
+    try:
+        save_chat_message(pg_url, user['username'], "user", prompt)
+    except Exception:
+        pass
+
     st.markdown(f"""
     <div class="chat-wrap">
         <div class="chat-label">You</div>
@@ -453,7 +510,7 @@ def render_chat(pg_url: str, api_key: str, model):
     </div>
     """, unsafe_allow_html=True)
 
-    # Typing indicator
+    # ── Typing indicator ──
     typing_placeholder = st.empty()
     typing_placeholder.markdown("""
     <div class="chat-wrap">
@@ -466,19 +523,27 @@ def render_chat(pg_url: str, api_key: str, model):
     </div>
     """, unsafe_allow_html=True)
 
-    # Build conversation memory (last 4 exchanges = 8 messages)
-    memory_msgs = st.session_state.messages[-9:-1]  # exclude current user msg
+    # ── Build conversation memory (last 4 exchanges) ──
+    memory_msgs = st.session_state.messages[-9:-1]
     memory_ctx  = ""
     if memory_msgs:
         memory_ctx = "\n\nCONVERSATION HISTORY (for context):\n"
         for m in memory_msgs:
             prefix = "User" if m['role'] == 'user' else "Assistant"
-            memory_ctx += f"{prefix}: {m['content'][:200]}\n"
+            memory_ctx += f"{prefix}: {str(m.get('content',''))[:200]}\n"
 
-    # Generate answer
+    # ── Generate answer ──
     t0 = time.time()
-    relevant_docs, scores = semantic_search(prompt, model, st.session_state.embeddings, st.session_state.chunks, n_results=5)
-    confidence = compute_confidence(scores)
+    try:
+        relevant_docs, scores = semantic_search(
+            prompt, model,
+            st.session_state.embeddings,
+            st.session_state.chunks,
+            n_results=5
+        )
+        confidence = compute_confidence(scores)
+    except Exception:
+        relevant_docs, scores, confidence = [], [], 0.0
 
     if relevant_docs:
         answer, success = generate_answer(
@@ -487,18 +552,23 @@ def render_chat(pg_url: str, api_key: str, model):
             lang_instruction=LANG_AUTO_INSTRUCTION
         )
     else:
-        answer  = "No relevant information found in the uploaded documents. Please ask an admin to upload more documents."
+        answer  = "This information is not available in the current documents. Please contact the department office directly."
         success = True
         confidence = 0.0
 
     ms = int((time.time() - t0) * 1000)
-
-    # Remove typing indicator
     typing_placeholder.empty()
 
-    log_query(pg_url, user['username'], prompt, ms, confidence, success)
+    try:
+        log_query(pg_url, user['username'], prompt, ms, confidence, success)
+    except Exception:
+        pass
+
     sources_json = json.dumps(relevant_docs[:3]) if relevant_docs else None
-    save_chat_message(pg_url, user['username'], "assistant", answer, sources_json, confidence)
+    try:
+        save_chat_message(pg_url, user['username'], "assistant", answer, sources_json, confidence)
+    except Exception:
+        pass
 
     ai_msg = {"role":"assistant","content":answer,"sources":sources_json,"confidence":confidence,"time":now}
     st.session_state.messages.append(ai_msg)
@@ -506,7 +576,7 @@ def render_chat(pg_url: str, api_key: str, model):
     conf_str = confidence_html(confidence)
     src_str  = ""
     if relevant_docs:
-        excerpts = "".join([f'<div class="src-text">"{s[:130]}..."</div>' for s in relevant_docs[:2]])
+        excerpts = "".join([f'<div class="src-text">"{str(s)[:130]}..."</div>' for s in relevant_docs[:2]])
         src_str  = f'<div class="src-wrap"><div class="src-label">Source Excerpts · {ms}ms</div>{excerpts}</div>'
 
     st.markdown(f"""
@@ -521,10 +591,11 @@ def render_chat(pg_url: str, api_key: str, model):
     """, unsafe_allow_html=True)
 
     idx = len(st.session_state.messages) - 1
-    _action_row(answer, idx, prompt, user['username'], pg_url)
-    _followup_chips(idx)
+    _action_row(answer, f"{idx}_{gen}", prompt, user.get('username',''), pg_url)
+    _followup_chips(f"{idx}_{gen}")
 
     if remaining <= 5:
         st.markdown(f'<div class="alert-warn">⚠️ You have {remaining} queries left this hour.</div>', unsafe_allow_html=True)
 
-    st.rerun()
+    # FIX: do NOT st.rerun() here — it would re-render the whole page including all history
+    # The new message is already rendered above; rerun caused the infinite render loop

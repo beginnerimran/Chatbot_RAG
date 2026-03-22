@@ -1,11 +1,13 @@
 """
 app.py — Main entry point. Run: streamlit run app.py
-All errors are caught and shown as clean friendly messages — no code tracebacks.
+FIXES:
+  - safe_render now prints real traceback to terminal (for debugging) while still showing
+    friendly message in UI — best of both worlds, no more silent swallowing
+  - load_secrets() st.stop() inside except block caused KeyError crash — fixed
+  - Notification rendering guarded against missing 'type' key on old DB rows
 """
 
-import sys
-import time
-import traceback
+import traceback as _traceback
 import streamlit as st
 
 from config import setup_page, SESSION_TIMEOUT_MINUTES
@@ -16,11 +18,11 @@ from sidebar import render_sidebar
 from chat import render_chat
 from dashboard import render_dashboard
 from ui_components import render_docs_panel, render_user_management, render_change_password
+import time
 
 
 # ─────────────────────────────────────────────
 # FRIENDLY ERROR MESSAGES
-# Maps common error types to clean user messages
 # ─────────────────────────────────────────────
 def friendly_error(e: Exception) -> str:
     msg = str(e).lower()
@@ -40,12 +42,10 @@ def friendly_error(e: Exception) -> str:
         return "You do not have permission to perform this action."
     if "not found" in msg or "no such" in msg:
         return "The requested resource was not found. Please refresh and try again."
-    # Generic fallback — never show raw error
     return "Something went wrong. Please refresh the page and try again."
 
 
 def show_error(message: str):
-    """Shows a clean, styled error card — no code, no traceback."""
     st.markdown(f"""
     <div style="
         background: rgba(240,82,82,0.08);
@@ -75,22 +75,28 @@ def show_error(message: str):
 
 def load_secrets():
     try:
-        return st.secrets["PG_URL"], st.secrets["GROQ_API_KEY"]
-    except Exception:
-        show_error("Configuration is missing. Please contact the administrator.")
+        pg  = st.secrets["PG_URL"]
+        key = st.secrets["GROQ_API_KEY"]
+        return pg, key
+    except Exception as e:
+        show_error("Configuration is missing (PG_URL or GROQ_API_KEY not set in secrets.toml).")
         st.stop()
+        return None, None  # never reached but satisfies type checker
 
 
 # ─────────────────────────────────────────────
 # GLOBAL ERROR BOUNDARY
-# Wraps every tab/section so one crash doesn't
-# break the whole app
+# FIX: prints real error to terminal AND shows friendly UI message
 # ─────────────────────────────────────────────
 def safe_render(fn, *args, **kwargs):
-    """Calls fn(*args) and catches any exception — shows friendly message instead of traceback."""
     try:
         fn(*args, **kwargs)
     except Exception as e:
+        # Always print real error to terminal so you can debug
+        print(f"\n[safe_render ERROR in {fn.__name__}]")
+        _traceback.print_exc()
+        print()
+        # Show friendly message in UI
         show_error(friendly_error(e))
 
 
@@ -98,16 +104,13 @@ def main():
     try:
         setup_page()
     except Exception:
-        pass  # CSS failure should not crash the app
+        pass
 
-    try:
-        pg_url, api_key = load_secrets()
-    except Exception:
-        show_error("Could not load configuration. Please contact the administrator.")
-        st.stop()
+    pg_url, api_key = load_secrets()
+    if not pg_url:
         return
 
-    # Init DB
+    # Init DB once per session
     try:
         if not st.session_state.get('db_initialised'):
             if init_db(pg_url):
@@ -121,11 +124,11 @@ def main():
         st.stop()
         return
 
-    # Restore session
+    # Restore session from URL token
     try:
         restore_session(pg_url)
     except Exception:
-        pass  # Session restore failure is non-critical — just show login
+        pass
 
     if not st.session_state.get('authenticated'):
         try:
@@ -146,7 +149,7 @@ def main():
     except Exception:
         pass
 
-    # Load semantic model
+    # Load semantic model (cached)
     try:
         model = load_semantic_model()
     except Exception:
@@ -155,7 +158,7 @@ def main():
     user = st.session_state.get('user', {})
     role = user.get('role', 'student')
 
-    # Onboarding tour
+    # Onboarding tour for first-time users
     if not user.get('onboarded'):
         try:
             render_onboarding(pg_url)
@@ -163,13 +166,13 @@ def main():
             show_error(friendly_error(e))
         return
 
-    # Sidebar
+    # Sidebar (failure here must not kill main content)
     try:
         render_sidebar(pg_url, api_key, model)
     except Exception:
-        pass  # Sidebar failure should not crash main content
+        pass
 
-    # Header
+    # Unread notification count
     try:
         unread = get_unread_count(pg_url, user['username'])
     except Exception:
@@ -188,7 +191,6 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Dark mode + Notifications
     hc1, hc2, hc3 = st.columns([1.5, 1.5, 9])
     with hc1:
         if st.button("☀️ Light" if dark else "🌙 Dark", key="theme_toggle", use_container_width=True):
@@ -211,11 +213,13 @@ def main():
             with st.expander("🔔 Notifications", expanded=True):
                 if notifs:
                     for n in notifs:
-                        icon = {"info":"ℹ️","success":"✅","warn":"⚠️","error":"❌"}.get(n['type'],"ℹ️")
-                        ts   = str(n['created_at'])[:16]
+                        # FIX: guard against missing 'type' key on old DB rows
+                        n_type = n['type'] if 'type' in n and n['type'] else 'info'
+                        icon   = {"info":"ℹ️","success":"✅","warn":"⚠️","error":"❌"}.get(n_type, "ℹ️")
+                        ts     = str(n.get('created_at',''))[:16]
                         st.markdown(f"""
                         <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.83rem;">
-                            {icon} {n['message']}<br>
+                            {icon} {n.get('message','')} <br>
                             <span style="font-size:0.65rem;color:var(--text-3);">{ts}</span>
                         </div>
                         """, unsafe_allow_html=True)
@@ -268,7 +272,6 @@ def main():
 
 # ─────────────────────────────────────────────
 # TOP-LEVEL SAFETY NET
-# Catches anything that escapes the main() try blocks
 # ─────────────────────────────────────────────
 try:
     main()
@@ -277,4 +280,6 @@ except Exception as e:
         setup_page()
     except Exception:
         pass
+    print("\n[TOP-LEVEL ERROR]")
+    _traceback.print_exc()
     show_error("The application encountered an unexpected error. Please refresh the page.")
