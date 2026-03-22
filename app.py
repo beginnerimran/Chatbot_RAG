@@ -1,10 +1,9 @@
 """
-app.py — Main entry point. Run: streamlit run app.py
-FIXES:
-  - safe_render now prints real traceback to terminal (for debugging) while still showing
-    friendly message in UI — best of both worlds, no more silent swallowing
-  - load_secrets() st.stop() inside except block caused KeyError crash — fixed
-  - Notification rendering guarded against missing 'type' key on old DB rows
+app.py — Main entry point.
+FIXES v2:
+  - Docs tab now hidden from students — only admin and staff see it
+  - safe_render prints real traceback to terminal while showing friendly UI message
+  - Notification type key guarded against missing values on old DB rows
 """
 
 import traceback as _traceback
@@ -21,9 +20,6 @@ from ui_components import render_docs_panel, render_user_management, render_chan
 import time
 
 
-# ─────────────────────────────────────────────
-# FRIENDLY ERROR MESSAGES
-# ─────────────────────────────────────────────
 def friendly_error(e: Exception) -> str:
     msg = str(e).lower()
     if "connection" in msg or "pg_url" in msg or "database" in msg or "psycopg" in msg:
@@ -47,17 +43,9 @@ def friendly_error(e: Exception) -> str:
 
 def show_error(message: str):
     st.markdown(f"""
-    <div style="
-        background: rgba(240,82,82,0.08);
-        border: 1px solid rgba(240,82,82,0.3);
-        border-left: 4px solid #f05252;
-        border-radius: 10px;
-        padding: 20px 24px;
-        margin: 20px 0;
-        max-width: 600px;
-        margin-left: auto;
-        margin-right: auto;
-    ">
+    <div style="background:rgba(240,82,82,0.08);border:1px solid rgba(240,82,82,0.3);
+                border-left:4px solid #f05252;border-radius:10px;padding:20px 24px;
+                margin:20px 0;max-width:600px;margin-left:auto;margin-right:auto;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
             <span style="font-size:1.4rem;">⚠️</span>
             <span style="font-size:1rem;font-weight:600;color:#f87171;">Something went wrong</span>
@@ -75,28 +63,20 @@ def show_error(message: str):
 
 def load_secrets():
     try:
-        pg  = st.secrets["PG_URL"]
-        key = st.secrets["GROQ_API_KEY"]
-        return pg, key
-    except Exception as e:
-        show_error("Configuration is missing (PG_URL or GROQ_API_KEY not set in secrets.toml).")
+        return st.secrets["PG_URL"], st.secrets["GROQ_API_KEY"]
+    except Exception:
+        show_error("Configuration missing — PG_URL or GROQ_API_KEY not set in secrets.toml.")
         st.stop()
-        return None, None  # never reached but satisfies type checker
+        return None, None
 
 
-# ─────────────────────────────────────────────
-# GLOBAL ERROR BOUNDARY
-# FIX: prints real error to terminal AND shows friendly UI message
-# ─────────────────────────────────────────────
 def safe_render(fn, *args, **kwargs):
+    """Runs fn, prints real error to terminal, shows friendly message in UI."""
     try:
         fn(*args, **kwargs)
     except Exception as e:
-        # Always print real error to terminal so you can debug
         print(f"\n[safe_render ERROR in {fn.__name__}]")
         _traceback.print_exc()
-        print()
-        # Show friendly message in UI
         show_error(friendly_error(e))
 
 
@@ -110,13 +90,12 @@ def main():
     if not pg_url:
         return
 
-    # Init DB once per session
     try:
         if not st.session_state.get('db_initialised'):
             if init_db(pg_url):
                 st.session_state.db_initialised = True
             else:
-                show_error("Unable to connect to the database. Please try again in a moment.")
+                show_error("Unable to connect to the database. Please try again.")
                 st.stop()
                 return
     except Exception as e:
@@ -124,7 +103,6 @@ def main():
         st.stop()
         return
 
-    # Restore session from URL token
     try:
         restore_session(pg_url)
     except Exception:
@@ -137,7 +115,6 @@ def main():
             show_error(friendly_error(e))
         return
 
-    # Session timeout
     try:
         if check_session_timeout():
             st.info("Your session has expired. Please sign in again.")
@@ -149,7 +126,6 @@ def main():
     except Exception:
         pass
 
-    # Load semantic model (cached)
     try:
         model = load_semantic_model()
     except Exception:
@@ -158,7 +134,6 @@ def main():
     user = st.session_state.get('user', {})
     role = user.get('role', 'student')
 
-    # Onboarding tour for first-time users
     if not user.get('onboarded'):
         try:
             render_onboarding(pg_url)
@@ -166,13 +141,11 @@ def main():
             show_error(friendly_error(e))
         return
 
-    # Sidebar (failure here must not kill main content)
     try:
         render_sidebar(pg_url, api_key, model)
     except Exception:
         pass
 
-    # Unread notification count
     try:
         unread = get_unread_count(pg_url, user['username'])
     except Exception:
@@ -213,9 +186,8 @@ def main():
             with st.expander("🔔 Notifications", expanded=True):
                 if notifs:
                     for n in notifs:
-                        # FIX: guard against missing 'type' key on old DB rows
-                        n_type = n['type'] if 'type' in n and n['type'] else 'info'
-                        icon   = {"info":"ℹ️","success":"✅","warn":"⚠️","error":"❌"}.get(n_type, "ℹ️")
+                        n_type = n['type'] if n.get('type') else 'info'
+                        icon   = {"info":"ℹ️","success":"✅","warn":"⚠️","error":"❌"}.get(n_type,"ℹ️")
                         ts     = str(n.get('created_at',''))[:16]
                         st.markdown(f"""
                         <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.83rem;">
@@ -228,12 +200,16 @@ def main():
         except Exception:
             pass
 
-    # Mobile bottom nav
+    # ── MOBILE BOTTOM NAV ──
+    # FIX: Students do not see Docs tab anywhere
     active_tab = st.query_params.get("tab", "chat")
     if role == "admin":
         nav_items = [("💬","Chat","chat"),("📚","Docs","docs"),("📊","Stats","dashboard"),("👥","Users","users"),("🔑","Account","account")]
-    else:
+    elif role == "staff":
         nav_items = [("💬","Chat","chat"),("📚","Docs","docs"),("🔑","Account","account")]
+    else:
+        # Students: Chat + Account only
+        nav_items = [("💬","Chat","chat"),("🔑","Account","account")]
 
     nav_html = '<div class="bottom-nav">'
     for icon, label, key in nav_items:
@@ -244,35 +220,36 @@ def main():
     nav_html += '</div>'
     st.markdown(nav_html, unsafe_allow_html=True)
 
-    # Tabs
+    # ── TABS ──
+    # FIX: Students only get Chat + Account tabs — no Docs tab
     if role == "admin":
         tabs    = st.tabs(["💬 Chat", "📚 Docs", "📊 Dashboard", "👥 Users", "🔑 Account"])
-        tab_map = {"chat":0, "docs":1, "dashboard":2, "users":3, "account":4}
-    else:
+        tab_map = {"chat":0,"docs":1,"dashboard":2,"users":3,"account":4}
+    elif role == "staff":
         tabs    = st.tabs(["💬 Chat", "📚 Docs", "🔑 Account"])
-        tab_map = {"chat":0, "docs":1, "account":2}
+        tab_map = {"chat":0,"docs":1,"account":2}
+    else:
+        # Student — no docs tab
+        tabs    = st.tabs(["💬 Chat", "🔑 Account"])
+        tab_map = {"chat":0,"account":1}
 
     with tabs[tab_map["chat"]]:
         safe_render(render_chat, pg_url, api_key, model)
 
-    with tabs[tab_map["docs"]]:
-        safe_render(render_docs_panel, pg_url, role)
+    if role in ("admin", "staff"):
+        with tabs[tab_map["docs"]]:
+            safe_render(render_docs_panel, pg_url, role)
 
     if role == "admin":
         with tabs[tab_map["dashboard"]]:
             safe_render(render_dashboard, pg_url)
         with tabs[tab_map["users"]]:
             safe_render(render_user_management, pg_url, user['username'])
-        with tabs[tab_map["account"]]:
-            safe_render(render_change_password, pg_url, user['username'])
-    else:
-        with tabs[tab_map["account"]]:
-            safe_render(render_change_password, pg_url, user['username'])
+
+    with tabs[tab_map["account"]]:
+        safe_render(render_change_password, pg_url, user['username'])
 
 
-# ─────────────────────────────────────────────
-# TOP-LEVEL SAFETY NET
-# ─────────────────────────────────────────────
 try:
     main()
 except Exception as e:
