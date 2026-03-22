@@ -237,15 +237,17 @@ def _inject_voice_js(mic_active: bool, tts_on: bool, toggle_id: int):
     }}
 
     // Stop button
-    var stopBtn = document.getElementById('tts-stop-btn');
-    if (stopBtn) {{
-        stopBtn.onclick = function() {{
-            if (synth) synth.cancel();
-            stopBtn.style.display = 'none';
-            var msgs = document.querySelectorAll('.chat-assistant');
-            if (msgs.length) msgs[msgs.length - 1].dataset.spoken = 'true';
-        }};
-    }}
+    setTimeout(function() {{
+        var stopBtn = document.getElementById('tts-stop-btn');
+        if (stopBtn) {{
+            stopBtn.onclick = function() {{
+                if (synth) synth.cancel();
+                stopBtn.style.display = 'none';
+                var msgs = document.querySelectorAll('.chat-assistant');
+                if (msgs.length) msgs[msgs.length - 1].dataset.spoken = 'true';
+            }};
+        }}
+    }}, 500);
 
     // Watch DOM for new AI messages
     new MutationObserver(function() {{
@@ -257,19 +259,30 @@ def _inject_voice_js(mic_active: bool, tts_on: bool, toggle_id: int):
 
     // ── STT ──
     if (!micOn) return;
+
+    // Block mic on mobile over plain HTTP (browser will silently deny anyway)
+    var isSecure = location.protocol === 'https:';
+    var isLocal  = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (!isSecure && !isLocal) {{
+        var el = document.getElementById('chat-voice-text');
+        if (el) el.textContent = 'Mic needs HTTPS — works on laptop or after deploying to Streamlit Cloud';
+        return;
+    }}
+
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {{
-        var el = document.getElementById('chat-voice-text');
-        if (el) el.textContent = 'Speech recognition not supported. Use Chrome or Edge.';
+        var el2 = document.getElementById('chat-voice-text');
+        if (el2) el2.textContent = 'Speech recognition not supported. Use Chrome or Edge.';
         return;
     }}
     if (window._activeRec) {{ try {{ window._activeRec.stop(); }} catch(e) {{}} }}
     var rec = new SR();
     window._activeRec = rec;
     rec.lang = 'en-IN';
-    rec.interimResults = true;
-    rec.continuous     = true;
+    rec.interimResults  = true;
+    rec.continuous      = true;
     rec.maxAlternatives = 1;
+
     var liveEl = document.getElementById('chat-voice-text');
     rec.onstart  = function() {{ if (liveEl) liveEl.textContent = 'Listening — speak now...'; }};
     rec.onresult = function(e) {{
@@ -292,9 +305,13 @@ def _inject_voice_js(mic_active: bool, tts_on: bool, toggle_id: int):
             }}
         }}
     }};
-    rec.onerror = function(e) {{ if (liveEl) liveEl.textContent = 'Mic error: ' + e.error; }};
-    rec.onend   = function() {{ if (micOn) {{ try {{ rec.start(); }} catch(e) {{}} }} }};
-    try {{ rec.start(); }} catch(e) {{
+    rec.onerror = function(e) {{
+        if (liveEl) liveEl.textContent = 'Mic error: ' + e.error + '. Check browser mic permissions.';
+    }};
+    rec.onend = function() {{ if (micOn) {{ try {{ rec.start(); }} catch(e) {{}} }} }};
+    try {{
+        rec.start();
+    }} catch(e) {{
         if (liveEl) liveEl.textContent = 'Could not start mic: ' + e.message;
     }}
 }})();
@@ -419,13 +436,35 @@ def render_chat(pg_url: str, api_key: str, model):
     with col_mic:
         mic_active = st.session_state.get('mic_active', False)
         if st.button("🔴" if mic_active else "🎤", key=f"mic_toggle_{gen}",
-                     help="Chrome/Edge only", use_container_width=True):
+                     help="Mic needs Chrome/Edge. On mobile it only works on HTTPS.",
+                     use_container_width=True):
             st.session_state.mic_active       = not mic_active
             st.session_state.mic_toggle_count = st.session_state.get('mic_toggle_count', 0) + 1
             st.rerun()
 
     if st.session_state.get('mic_active'):
-        st.markdown('<div class="mic-banner">🔴 <span id="chat-voice-text">Listening — speak now...</span></div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div class="mic-banner">🔴 <span id="chat-voice-text">Initialising mic...</span></div>
+        <div id="mic-https-warn" style="display:none;background:rgba(240,165,0,0.1);
+             border:1px solid rgba(240,165,0,0.3);border-radius:6px;padding:8px 12px;
+             font-size:0.78rem;color:#f0a500;margin-top:4px;">
+            Mobile mic needs HTTPS. Works on laptop browser or after deploying to Streamlit Cloud.
+        </div>
+        <script>
+        (function() {
+            var host     = window.location.hostname;
+            var isSecure = window.location.protocol === 'https:';
+            var isLocal  = host === 'localhost' || host === '127.0.0.1';
+            var isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+            if (isMobile && !isSecure && !isLocal) {
+                var w = document.getElementById('mic-https-warn');
+                if (w) w.style.display = 'block';
+                var t = document.getElementById('chat-voice-text');
+                if (t) t.textContent = 'Mic blocked — needs HTTPS on mobile';
+            }
+        })();
+        </script>
+        """, unsafe_allow_html=True)
 
     with col_input:
         prompt = st.chat_input("Ask about your college documents...") or pending

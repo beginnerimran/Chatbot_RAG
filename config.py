@@ -83,7 +83,14 @@ html, body, [class*="css"] {{
     -webkit-font-smoothing: antialiased;
 }}
 .stApp {{ background: var(--bg) !important; }}
-#MainMenu, footer, header {{ visibility: hidden !important; }}
+
+/* Hide Streamlit chrome — but keep sidebar toggle button visible */
+#MainMenu {{ visibility: hidden !important; }}
+footer {{ visibility: hidden !important; }}
+[data-testid="stToolbar"] {{ visibility: hidden !important; }}
+/* Sidebar collapse/expand button — must stay visible and clickable */
+[data-testid="collapsedControl"] {{ visibility: visible !important; display: flex !important; opacity: 1 !important; }}
+[data-testid="stSidebarCollapseButton"] {{ visibility: visible !important; display: flex !important; opacity: 1 !important; }}
 
 /* Hide anchor copy-link icons */
 h1 a, h2 a, h3 a, h4 a,
