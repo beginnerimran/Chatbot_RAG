@@ -1,0 +1,13 @@
+streamlit==1.28.1
+langchain==0.1.10
+langchain-community==0.0.20
+chromadb==0.4.22
+pdf2image==1.16.3
+PyPDF2==3.0.1
+python-dotenv==1.0.0
+huggingface-hub==0.19.4
+sentence-transformers
+psycopg2-binary
+numpy
+requests
+reportlab
