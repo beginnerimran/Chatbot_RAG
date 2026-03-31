@@ -1,12 +1,13 @@
 """
 chat.py — Full chat UI.
-FIXES v2:
-  - Raw HTML leak: components.html Copy button replaced — was rendering raw HTML in page
-  - Mic broken: moved JS injection from components.html to st.markdown (sandboxed iframe
-    cannot access parent DOM reliably on Chrome/mobile)
-  - Read Aloud: live Stop Speaking button appears while AI is talking, disappears when done
-  - Docs tab: students blocked at app.py level — no docs tab rendered for student role
+FIXES v3:
+  - Mic fixed: use st.components.v1.html for JS so scripts actually execute
+    (st.markdown strips <script> tags; components.v1.html runs in an iframe that
+    CAN reach parent DOM via window.parent on same-origin Streamlit pages)
+  - Read Aloud: live Stop Speaking button appears while AI is talking
+  - Docs tab: students blocked at app.py level
   - All widget keys include render_gen to prevent DuplicateWidgetID
+  - Emojis removed throughout
 """
 
 import io
@@ -16,6 +17,7 @@ import urllib.parse
 from datetime import datetime
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from auth import check_permission
 from config import SUGGESTIONS
@@ -135,30 +137,30 @@ def _action_row(answer: str, msg_key: str, question: str, username: str, pg_url:
                   border-radius:6px;font-size:0.78rem;font-weight:500;
                   border:1px solid var(--border-2);background:var(--bg-3);
                   color:var(--text-2);text-decoration:none;">
-            ✈️ Share on Telegram
+            Share on Telegram
         </a>
     </div>
     """, unsafe_allow_html=True)
 
     c1, c2, c3, _ = st.columns([1.5, 1.8, 2, 4])
     with c1:
-        if st.button("👍 Helpful", key=f"up_{msg_key}", use_container_width=True):
+        if st.button("Helpful", key=f"up_{msg_key}", use_container_width=True):
             try:
                 save_feedback(pg_url, username, question, answer, 1)
-                st.toast("Thanks for your feedback!", icon="👍")
+                st.toast("Thanks for your feedback!")
             except Exception:
                 pass
     with c2:
-        if st.button("👎 Not helpful", key=f"dn_{msg_key}", use_container_width=True):
+        if st.button("Not Helpful", key=f"dn_{msg_key}", use_container_width=True):
             try:
                 save_feedback(pg_url, username, question, answer, -1)
-                st.toast("Thanks — we will improve!", icon="👎")
+                st.toast("Thanks — we will improve!")
             except Exception:
                 pass
     with c3:
         try:
             st.download_button(
-                label="📄 Save PDF",
+                label="Save as PDF",
                 data=_single_pdf(question or "Query", answer),
                 file_name=f"answer_{msg_key}.{ext}",
                 mime=mime,
@@ -187,31 +189,35 @@ def _followup_chips(msg_key: str):
 
 
 # ─────────────────────────────────────────────
-# VOICE JS — injected via st.markdown, NOT components.html
-# FIX: components.html(height=0) runs in a sandboxed iframe.
-# On Chrome and mobile it cannot reliably access window.parent DOM elements
-# (textarea, .chat-assistant divs). st.markdown injects directly into the
-# main Streamlit document so querySelector works correctly.
+# VOICE JS
+# FIX: st.markdown strips <script> tags (innerHTML doesn't execute them).
+# components.v1.html runs in a same-origin iframe; we use window.parent to
+# reach the Streamlit textarea and .chat-assistant bubbles in the parent frame.
 # ─────────────────────────────────────────────
 def _inject_voice_js(mic_active: bool, tts_on: bool, toggle_id: int):
     tts_js = "true" if tts_on else "false"
     mic_js = "true" if mic_active else "false"
-    st.markdown(f"""
+    # language=html
+    html_code = f"""
+<!DOCTYPE html>
+<html><body style="margin:0;padding:0;">
 <script>
 (function() {{
     var uid = 'v{toggle_id}';
-    if (window['_vjs_' + uid]) return;
-    window['_vjs_' + uid] = true;
+    // Guard: only run once per toggle state
+    if (window.top['_vjs_' + uid]) return;
+    window.top['_vjs_' + uid] = true;
 
     var ttsOn = {tts_js};
     var micOn = {mic_js};
-    var synth = window.speechSynthesis;
+    var doc   = window.parent.document;
+    var synth = window.parent.speechSynthesis;
 
     // ── TTS ──
     function speakLast() {{
         if (!ttsOn || !synth) return;
         synth.cancel();
-        var msgs = document.querySelectorAll('.chat-assistant');
+        var msgs = doc.querySelectorAll('.chat-assistant');
         if (!msgs.length) return;
         var last = msgs[msgs.length - 1];
         if (last.dataset.spoken === 'true') return;
@@ -226,97 +232,134 @@ def _inject_voice_js(mic_active: bool, tts_on: bool, toggle_id: int):
         if (voice) utt.voice = voice;
         last.dataset.spoken = 'true';
         utt.onstart = function() {{
-            var b = document.getElementById('tts-stop-btn');
+            var b = doc.getElementById('tts-stop-btn');
             if (b) b.style.display = 'flex';
         }};
         utt.onend = utt.onerror = function() {{
-            var b = document.getElementById('tts-stop-btn');
+            var b = doc.getElementById('tts-stop-btn');
             if (b) b.style.display = 'none';
         }};
         synth.speak(utt);
     }}
 
-    // Stop button
+    // Stop button wiring (parent document)
     setTimeout(function() {{
-        var stopBtn = document.getElementById('tts-stop-btn');
+        var stopBtn = doc.getElementById('tts-stop-btn');
         if (stopBtn) {{
             stopBtn.onclick = function() {{
                 if (synth) synth.cancel();
                 stopBtn.style.display = 'none';
-                var msgs = document.querySelectorAll('.chat-assistant');
+                var msgs = doc.querySelectorAll('.chat-assistant');
                 if (msgs.length) msgs[msgs.length - 1].dataset.spoken = 'true';
             }};
         }}
-    }}, 500);
+    }}, 600);
 
-    // Watch DOM for new AI messages
+    // Watch parent DOM for new AI messages
     new MutationObserver(function() {{
-        var msgs = document.querySelectorAll('.chat-assistant');
+        var msgs = doc.querySelectorAll('.chat-assistant');
         if (!msgs.length) return;
         var last = msgs[msgs.length - 1];
         if (last && last.dataset.spoken !== 'true') speakLast();
-    }}).observe(document.body, {{ childList: true, subtree: true }});
+    }}).observe(doc.body, {{ childList: true, subtree: true }});
 
     // ── STT ──
     if (!micOn) return;
 
-    // Block mic on mobile over plain HTTP (browser will silently deny anyway)
-    var isSecure = location.protocol === 'https:';
-    var isLocal  = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    // Check security context in the PARENT window (the real app)
+    var pLoc     = window.parent.location;
+    var isSecure = pLoc.protocol === 'https:';
+    var isLocal  = pLoc.hostname === 'localhost' || pLoc.hostname === '127.0.0.1';
+
+    var liveEl = doc.getElementById('chat-voice-text');
+
     if (!isSecure && !isLocal) {{
-        var el = document.getElementById('chat-voice-text');
-        if (el) el.textContent = 'Mic needs HTTPS — works on laptop or after deploying to Streamlit Cloud';
+        if (liveEl) liveEl.textContent = 'Mic requires HTTPS — works on Streamlit Cloud or localhost.';
         return;
     }}
 
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // Use parent window SpeechRecognition (same origin)
+    var SR = window.parent.SpeechRecognition || window.parent.webkitSpeechRecognition;
     if (!SR) {{
-        var el2 = document.getElementById('chat-voice-text');
-        if (el2) el2.textContent = 'Speech recognition not supported. Use Chrome or Edge.';
+        if (liveEl) liveEl.textContent = 'Speech recognition not supported in this browser. Please use Chrome or Edge.';
         return;
     }}
-    if (window._activeRec) {{ try {{ window._activeRec.stop(); }} catch(e) {{}} }}
+
+    // Stop any existing recognition session
+    if (window.top['_activeRec']) {{
+        try {{ window.top['_activeRec'].stop(); }} catch(e) {{}}
+    }}
+
     var rec = new SR();
-    window._activeRec = rec;
-    rec.lang = 'en-IN';
+    window.top['_activeRec'] = rec;
+    rec.lang            = 'en-IN';
     rec.interimResults  = true;
-    rec.continuous      = true;
+    rec.continuous      = false;  // single utterance; we restart on end for reliability
     rec.maxAlternatives = 1;
 
-    var liveEl = document.getElementById('chat-voice-text');
-    rec.onstart  = function() {{ if (liveEl) liveEl.textContent = 'Listening — speak now...'; }};
+    rec.onstart = function() {{
+        if (liveEl) liveEl.textContent = 'Listening — speak now ...';
+    }};
+
     rec.onresult = function(e) {{
-        var interim = '', final = '';
+        var interim = '', final_text = '';
         for (var i = e.resultIndex; i < e.results.length; i++) {{
             var t = e.results[i][0].transcript;
-            if (e.results[i].isFinal) final += t; else interim += t;
+            if (e.results[i].isFinal) final_text += t;
+            else interim += t;
         }}
-        if (liveEl) liveEl.textContent = final || interim || 'Listening...';
-        if (final) {{
-            var inp = document.querySelector('textarea[data-testid="stChatInputTextArea"]');
+        if (liveEl) liveEl.textContent = final_text || interim || 'Listening ...';
+
+        if (final_text.trim()) {{
+            // Insert transcribed text into Streamlit chat input in the parent doc
+            var inp = doc.querySelector('textarea[data-testid="stChatInputTextArea"]');
             if (inp) {{
-                var setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-                setter.call(inp, final.trim());
-                inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                var setter = Object.getOwnPropertyDescriptor(
+                    window.parent.HTMLTextAreaElement.prototype, 'value'
+                ).set;
+                setter.call(inp, final_text.trim());
+                inp.dispatchEvent(new window.parent.Event('input', {{ bubbles: true }}));
                 inp.focus();
+                // Trigger send after brief delay
                 setTimeout(function() {{
-                    inp.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', keyCode: 13, bubbles: true }}));
-                }}, 350);
+                    inp.dispatchEvent(new window.parent.KeyboardEvent('keydown', {{
+                        key: 'Enter', keyCode: 13, bubbles: true
+                    }}));
+                }}, 400);
+            }} else {{
+                if (liveEl) liveEl.textContent = 'Transcribed: ' + final_text.trim() + ' (could not auto-submit — click the chat input and press Enter)';
             }}
         }}
     }};
+
     rec.onerror = function(e) {{
-        if (liveEl) liveEl.textContent = 'Mic error: ' + e.error + '. Check browser mic permissions.';
+        var msg = e.error;
+        if (msg === 'not-allowed') msg = 'Microphone access denied — please allow mic in browser settings.';
+        if (msg === 'no-speech')   msg = 'No speech detected. Please try again.';
+        if (liveEl) liveEl.textContent = 'Mic error: ' + msg;
+        // Restart on recoverable errors
+        if (e.error !== 'not-allowed' && e.error !== 'service-not-allowed') {{
+            setTimeout(function() {{ try {{ rec.start(); }} catch(ex) {{}} }}, 1000);
+        }}
     }};
-    rec.onend = function() {{ if (micOn) {{ try {{ rec.start(); }} catch(e) {{}} }} }};
+
+    rec.onend = function() {{
+        // Keep listening as long as mic is toggled on
+        if (micOn) {{
+            setTimeout(function() {{ try {{ rec.start(); }} catch(e) {{}} }}, 300);
+        }}
+    }};
+
     try {{
         rec.start();
     }} catch(e) {{
-        if (liveEl) liveEl.textContent = 'Could not start mic: ' + e.message;
+        if (liveEl) liveEl.textContent = 'Could not start microphone: ' + e.message;
     }}
 }})();
 </script>
-""", unsafe_allow_html=True)
+</body></html>
+"""
+    components.html(html_code, height=0, scrolling=False)
 
 
 # ─────────────────────────────────────────────
@@ -357,19 +400,22 @@ def render_chat(pg_url: str, api_key: str, model):
     if not st.session_state.messages:
         st.markdown(f"""
         <div style="text-align:center;padding:48px 20px;">
-            <div style="font-size:3.5rem;margin-bottom:14px;">🎓</div>
-            <h3 style="color:var(--teal);margin-bottom:6px;font-weight:600;">Welcome, {user.get('display','!')}!</h3>
+            <div style="width:64px;height:64px;background:var(--blue);border-radius:14px;
+                        display:inline-flex;align-items:center;justify-content:center;
+                        color:#fff;font-weight:900;font-size:1.3rem;margin-bottom:14px;
+                        box-shadow:0 4px 20px rgba(26,79,160,0.3);">SRM</div>
+            <h3 style="color:var(--blue);margin-bottom:6px;font-weight:700;">Welcome, {user.get('display','!')}!</h3>
             <p style="color:var(--text-2);font-size:0.9rem;">Ask anything about your college documents.</p>
             {'<p style="font-size:0.75rem;color:var(--text-3);margin-top:6px;">Previous conversations saved — use Load History in sidebar.</p>' if not st.session_state.get("history_loaded") else ''}
         </div>
         """, unsafe_allow_html=True)
 
     if st.session_state.messages:
-        label = "📜 Restored history" if st.session_state.get("history_loaded") else "🟢 Current session"
-        color = "#4f8ef7" if st.session_state.get("history_loaded") else "#00c9a7"
+        label = "Restored history" if st.session_state.get("history_loaded") else "Current session"
+        color = "#2563c0" if st.session_state.get("history_loaded") else "#0a7c4e"
         st.markdown(
-            f'<div style="font-size:0.72rem;color:{color};font-family:JetBrains Mono,monospace;margin-bottom:10px;">'
-            f'<span class="dot" style="background:{color};box-shadow:0 0 5px {color};"></span>{label}</div>',
+            f'<div style="font-size:0.72rem;color:{color};font-family:Inter,sans-serif;margin-bottom:10px;">'
+            f'<span class="dot" style="background:{color};"></span>{label}</div>',
             unsafe_allow_html=True
         )
 
@@ -435,8 +481,9 @@ def render_chat(pg_url: str, api_key: str, model):
     col_mic, col_input = st.columns([1, 11])
     with col_mic:
         mic_active = st.session_state.get('mic_active', False)
-        if st.button("🔴" if mic_active else "🎤", key=f"mic_toggle_{gen}",
-                     help="Mic needs Chrome/Edge. On mobile it only works on HTTPS.",
+        mic_label  = "Stop Mic" if mic_active else "Mic"
+        if st.button(mic_label, key=f"mic_toggle_{gen}",
+                     help="Mic requires Chrome or Edge. On mobile it only works over HTTPS.",
                      use_container_width=True):
             st.session_state.mic_active       = not mic_active
             st.session_state.mic_toggle_count = st.session_state.get('mic_toggle_count', 0) + 1
@@ -444,26 +491,7 @@ def render_chat(pg_url: str, api_key: str, model):
 
     if st.session_state.get('mic_active'):
         st.markdown("""
-        <div class="mic-banner">🔴 <span id="chat-voice-text">Initialising mic...</span></div>
-        <div id="mic-https-warn" style="display:none;background:rgba(240,165,0,0.1);
-             border:1px solid rgba(240,165,0,0.3);border-radius:6px;padding:8px 12px;
-             font-size:0.78rem;color:#f0a500;margin-top:4px;">
-            Mobile mic needs HTTPS. Works on laptop browser or after deploying to Streamlit Cloud.
-        </div>
-        <script>
-        (function() {
-            var host     = window.location.hostname;
-            var isSecure = window.location.protocol === 'https:';
-            var isLocal  = host === 'localhost' || host === '127.0.0.1';
-            var isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-            if (isMobile && !isSecure && !isLocal) {
-                var w = document.getElementById('mic-https-warn');
-                if (w) w.style.display = 'block';
-                var t = document.getElementById('chat-voice-text');
-                if (t) t.textContent = 'Mic blocked — needs HTTPS on mobile';
-            }
-        })();
-        </script>
+        <div class="mic-banner">Microphone active &mdash; <span id="chat-voice-text">Initialising...</span></div>
         """, unsafe_allow_html=True)
 
     with col_input:
@@ -472,8 +500,8 @@ def render_chat(pg_url: str, api_key: str, model):
     tts_on = st.session_state.get('tts_enabled', True)
     c1, c2, c3 = st.columns([2, 2, 2])
     with c1:
-        if st.button("🔊 Read Aloud: ON" if tts_on else "🔇 Read Aloud: OFF",
-                     key=f"tts_toggle_{gen}", use_container_width=True):
+        tts_label = "Read Aloud: ON" if tts_on else "Read Aloud: OFF"
+        if st.button(tts_label, key=f"tts_toggle_{gen}", use_container_width=True):
             st.session_state.tts_enabled = not tts_on
             st.rerun()
     with c2:
@@ -483,9 +511,9 @@ def render_chat(pg_url: str, api_key: str, model):
             style="display:none;width:100%;align-items:center;justify-content:center;
                    gap:6px;padding:10px 0;border-radius:8px;font-size:0.85rem;font-weight:600;
                    cursor:pointer;border:none;min-height:44px;
-                   background:linear-gradient(135deg,#f05252,#c0392b);color:#fff;
+                   background:linear-gradient(135deg,#c0392b,#a93226);color:#fff;
                    font-family:Inter,sans-serif;">
-            ⏹ Stop Speaking
+            Stop Speaking
         </button>
         """, unsafe_allow_html=True)
     with c3:
@@ -493,7 +521,7 @@ def render_chat(pg_url: str, api_key: str, model):
             try:
                 mime, ext = _pdf_type()
                 st.download_button(
-                    label="📥 Export Chat",
+                    label="Export Chat",
                     data=export_conversation_pdf(st.session_state.messages, user.get('username','user')),
                     file_name=f"conversation_{datetime.now().strftime('%Y%m%d_%H%M')}.{ext}",
                     mime=mime,

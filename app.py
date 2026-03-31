@@ -1,9 +1,9 @@
 """
 app.py — Main entry point.
-FIXES v2:
-  - Docs tab now hidden from students — only admin and staff see it
-  - safe_render prints real traceback to terminal while showing friendly UI message
-  - Notification type key guarded against missing values on old DB rows
+FIXES v3:
+  - Removed dark/light mode toggle
+  - Removed all emojis from header and tabs
+  - SRM blue/white branding throughout
 """
 
 import traceback as _traceback
@@ -43,19 +43,18 @@ def friendly_error(e: Exception) -> str:
 
 def show_error(message: str):
     st.markdown(f"""
-    <div style="background:rgba(240,82,82,0.08);border:1px solid rgba(240,82,82,0.3);
-                border-left:4px solid #f05252;border-radius:10px;padding:20px 24px;
+    <div style="background:rgba(192,57,43,0.07);border:1px solid rgba(192,57,43,0.25);
+                border-left:4px solid #c0392b;border-radius:10px;padding:20px 24px;
                 margin:20px 0;max-width:600px;margin-left:auto;margin-right:auto;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-            <span style="font-size:1.4rem;">⚠️</span>
-            <span style="font-size:1rem;font-weight:600;color:#f87171;">Something went wrong</span>
+            <span style="font-size:1rem;font-weight:700;color:#a93226;">Something went wrong</span>
         </div>
-        <p style="color:#fca5a5;font-size:0.88rem;margin:0 0 12px 0;line-height:1.6;">{message}</p>
+        <p style="color:#c0392b;font-size:0.88rem;margin:0 0 12px 0;line-height:1.6;">{message}</p>
         <button onclick="window.location.reload()"
-            style="background:rgba(240,82,82,0.2);border:1px solid rgba(240,82,82,0.4);
-                   color:#f87171;padding:7px 18px;border-radius:6px;cursor:pointer;
+            style="background:rgba(192,57,43,0.12);border:1px solid rgba(192,57,43,0.35);
+                   color:#a93226;padding:7px 18px;border-radius:6px;cursor:pointer;
                    font-size:0.82rem;font-family:Inter,sans-serif;">
-            🔄 Refresh Page
+            Refresh Page
         </button>
     </div>
     """, unsafe_allow_html=True)
@@ -151,26 +150,25 @@ def main():
     except Exception:
         unread = 0
 
-    dark = st.session_state.get('dark_mode', True)
-
+    # App header — SRM branded, no emojis
     st.markdown(f"""
     <div class="app-header">
-        <div class="app-header-title">🎓 College AI Assistant</div>
+        <div class="app-header-title">
+            <span class="srm-logo-text">SRM</span>
+            College AI Assistant
+        </div>
         <div class="app-header-meta">
-            <span style="color:var(--text-3);font-size:0.78rem;">SRM Institute · CS Dept</span>
+            <span style="color:rgba(255,255,255,0.70);font-size:0.78rem;">CS Department</span>
             <span class="role-badge role-{role}">{role}</span>
-            <span style="font-weight:500;">{user.get('display','')}</span>
+            <span style="color:#ffffff;font-weight:500;">{user.get('display','')}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    hc1, hc2, hc3 = st.columns([1.5, 1.5, 9])
+    # Notifications button only (dark mode toggle removed)
+    hc1, hc2 = st.columns([1.5, 10.5])
     with hc1:
-        if st.button("☀️ Light" if dark else "🌙 Dark", key="theme_toggle", use_container_width=True):
-            st.session_state.dark_mode = not dark
-            st.rerun()
-    with hc2:
-        notif_label = f"🔔 ({unread})" if unread > 0 else "🔔"
+        notif_label = f"Notifications ({unread})" if unread > 0 else "Notifications"
         if st.button(notif_label, key="notif_btn", use_container_width=True):
             st.session_state.show_notifications = not st.session_state.get('show_notifications', False)
             if st.session_state.show_notifications:
@@ -183,15 +181,14 @@ def main():
     if st.session_state.get('show_notifications'):
         try:
             notifs = get_notifications(pg_url, user['username'])
-            with st.expander("🔔 Notifications", expanded=True):
+            with st.expander("Notifications", expanded=True):
                 if notifs:
                     for n in notifs:
                         n_type = n['type'] if n.get('type') else 'info'
-                        icon   = {"info":"ℹ️","success":"✅","warn":"⚠️","error":"❌"}.get(n_type,"ℹ️")
                         ts     = str(n.get('created_at',''))[:16]
                         st.markdown(f"""
                         <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.83rem;">
-                            {icon} {n.get('message','')} <br>
+                            {n.get('message','')} <br>
                             <span style="font-size:0.65rem;color:var(--text-3);">{ts}</span>
                         </div>
                         """, unsafe_allow_html=True)
@@ -201,36 +198,32 @@ def main():
             pass
 
     # ── MOBILE BOTTOM NAV ──
-    # FIX: Students do not see Docs tab anywhere
     active_tab = st.query_params.get("tab", "chat")
     if role == "admin":
-        nav_items = [("💬","Chat","chat"),("📚","Docs","docs"),("📊","Stats","dashboard"),("👥","Users","users"),("🔑","Account","account")]
+        nav_items = [("Chat","chat"),("Docs","docs"),("Stats","dashboard"),("Users","users"),("Account","account")]
     elif role == "staff":
-        nav_items = [("💬","Chat","chat"),("📚","Docs","docs"),("🔑","Account","account")]
+        nav_items = [("Chat","chat"),("Docs","docs"),("Account","account")]
     else:
-        # Students: Chat + Account only
-        nav_items = [("💬","Chat","chat"),("🔑","Account","account")]
+        nav_items = [("Chat","chat"),("Account","account")]
 
     nav_html = '<div class="bottom-nav">'
-    for icon, label, key in nav_items:
+    for label, key in nav_items:
         active_cls = "active" if active_tab == key else ""
         nav_html  += (f'<button class="bottom-nav-btn {active_cls}" '
                       f'onclick="window.parent.location.href=window.parent.location.pathname+\'?tab={key}\'">'
-                      f'<span class="nav-icon">{icon}</span>{label}</button>')
+                      f'<span class="nav-icon"></span>{label}</button>')
     nav_html += '</div>'
     st.markdown(nav_html, unsafe_allow_html=True)
 
     # ── TABS ──
-    # FIX: Students only get Chat + Account tabs — no Docs tab
     if role == "admin":
-        tabs    = st.tabs(["💬 Chat", "📚 Docs", "📊 Dashboard", "👥 Users", "🔑 Account"])
+        tabs    = st.tabs(["Chat", "Docs", "Dashboard", "Users", "Account"])
         tab_map = {"chat":0,"docs":1,"dashboard":2,"users":3,"account":4}
     elif role == "staff":
-        tabs    = st.tabs(["💬 Chat", "📚 Docs", "🔑 Account"])
+        tabs    = st.tabs(["Chat", "Docs", "Account"])
         tab_map = {"chat":0,"docs":1,"account":2}
     else:
-        # Student — no docs tab
-        tabs    = st.tabs(["💬 Chat", "🔑 Account"])
+        tabs    = st.tabs(["Chat", "Account"])
         tab_map = {"chat":0,"account":1}
 
     with tabs[tab_map["chat"]]:

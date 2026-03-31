@@ -11,7 +11,7 @@ from database import (
 
 
 def render_dashboard(pg_url: str):
-    st.markdown("### 📊 Analytics Dashboard")
+    st.markdown("### Analytics Dashboard")
 
     stats   = get_stats(pg_url)
     avg_rt  = get_avg_response_time(pg_url)
@@ -60,7 +60,7 @@ def render_dashboard(pg_url: str):
         if total_fb > 0:
             import pandas as pd
             df_fb = pd.DataFrame({
-                "Feedback": ["👍 Helpful", "👎 Not Helpful"],
+                "Feedback": ["Helpful", "Not Helpful"],
                 "Count":    [thumbs_up,    total_fb - thumbs_up]
             })
             st.bar_chart(df_fb.set_index("Feedback")["Count"], use_container_width=True)
@@ -83,10 +83,10 @@ def render_dashboard(pg_url: str):
                 st.markdown(f"""
                 <div style="margin-bottom:8px;">
                     <div style="display:flex;justify-content:space-between;font-size:0.78rem;color:var(--text-2);margin-bottom:3px;">
-                        <span>{q}</span><span style="color:var(--teal);font-weight:600;">{count}x</span>
+                        <span>{q}</span><span style="color:var(--blue);font-weight:600;">{count}x</span>
                     </div>
-                    <div style="background:rgba(128,128,128,0.1);border-radius:3px;height:4px;">
-                        <div style="background:var(--teal);height:4px;border-radius:3px;width:{pct}%;"></div>
+                    <div style="background:var(--blue-dim);border-radius:3px;height:4px;">
+                        <div style="background:var(--blue);height:4px;border-radius:3px;width:{pct}%;"></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -99,16 +99,17 @@ def render_dashboard(pg_url: str):
         feedback_rows = get_feedback_list(pg_url, limit=8)
         if feedback_rows:
             for fb in feedback_rows:
-                icon  = "👍" if fb['rating'] == 1 else "👎"
-                color = "#0ea472" if fb['rating'] == 1 else "#f05252"
+                rating_label = "Helpful" if fb['rating'] == 1 else "Not Helpful"
+                color        = "#0a7c4e" if fb['rating'] == 1 else "#c0392b"
                 q     = fb['query'][:50] + "..." if len(fb['query']) > 50 else fb['query']
                 ts    = str(fb['created_at'])[:16]
                 st.markdown(f"""
                 <div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border);">
-                    <span style="font-size:1rem;">{icon}</span>
+                    <span style="font-size:0.75rem;font-weight:600;color:{color};padding:2px 7px;
+                                 background:{color}18;border-radius:4px;">{rating_label}</span>
                     <div>
                         <div style="font-size:0.78rem;color:var(--text-2);">{q}</div>
-                        <div style="font-size:0.65rem;color:var(--text-3);">{fb['username']} · {ts}</div>
+                        <div style="font-size:0.65rem;color:var(--text-3);">{fb['username']} &middot; {ts}</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)

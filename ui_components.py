@@ -12,7 +12,7 @@ from database import (
 
 
 def render_docs_panel(pg_url: str, role: str):
-    st.markdown("### 📚 Uploaded Documents")
+    st.markdown("### Uploaded Documents")
     docs = get_document_list(pg_url)
     if not docs:
         st.markdown('<div class="alert-info">No documents uploaded yet. Ask Admin or Staff to upload college PDFs.</div>', unsafe_allow_html=True)
@@ -32,20 +32,20 @@ def render_docs_panel(pg_url: str, role: str):
         with col_info:
             st.markdown(f"""
             <div class="doc-card">
-                <div class="doc-card-name">📄 {fname} {ocr_tag} <span class="cat-badge" style="background:rgba(0,201,167,0.1);color:var(--teal);border:1px solid var(--teal-b);">{cat}</span></div>
-                <div class="doc-card-meta">{chunks} chunks · uploaded by {uploader} · {at}</div>
+                <div class="doc-card-name">{fname} {ocr_tag} <span class="cat-badge">{cat}</span></div>
+                <div class="doc-card-meta">{chunks} chunks &middot; uploaded by {uploader} &middot; {at}</div>
             </div>
             """, unsafe_allow_html=True)
         with col_del:
             if check_permission(role, "delete"):
-                if st.button("🗑️", key=f"docs_del_{doc['id']}", help="Delete"):
+                if st.button("Delete", key=f"docs_del_{doc['id']}", help="Delete document"):
                     if delete_document(pg_url, doc['id']):
                         st.session_state.docs_loaded = False
                         st.rerun()
 
 
 def render_user_management(pg_url: str, current_username: str):
-    st.markdown("### 👥 User Management")
+    st.markdown("### User Management")
 
     with st.expander("Add New User", expanded=False):
         with st.form("add_user_form"):
@@ -71,7 +71,7 @@ def render_user_management(pg_url: str, current_username: str):
         for u in users:
             c1, c2, c3, c4, c5 = st.columns([2, 1.5, 2, 2, 1])
             with c1:
-                st.markdown(f"<div style='font-size:0.82rem;'>👤 {u['username']}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:0.82rem;'>{u['username']}</div>", unsafe_allow_html=True)
             with c2:
                 st.markdown(f'<span class="role-badge role-{u["role"]}">{u["role"]}</span>', unsafe_allow_html=True)
             with c3:
@@ -81,7 +81,7 @@ def render_user_management(pg_url: str, current_username: str):
                 st.markdown(f"<div style='font-size:0.65rem;color:var(--text-3);'>Last: {last_a}</div>", unsafe_allow_html=True)
             with c5:
                 if u['username'] != current_username:
-                    if st.button("🗑", key=f"del_user_{u['id']}"):
+                    if st.button("Del", key=f"del_user_{u['id']}"):
                         ok, msg = delete_user(pg_url, u['id'], current_username)
                         if ok:
                             st.rerun()
@@ -94,7 +94,7 @@ def render_user_management(pg_url: str, current_username: str):
 
 
 def render_change_password(pg_url: str, username: str):
-    st.markdown("### 🔑 Account Settings")
+    st.markdown("### Account Settings")
     with st.expander("Change Password", expanded=False):
         with st.form("change_pw_form"):
             old_pw  = st.text_input("Current Password", type="password")

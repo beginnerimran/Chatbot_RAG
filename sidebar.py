@@ -46,7 +46,7 @@ def render_sidebar(pg_url: str, api_key: str, model):
 
         # Upload — Admin/Staff only
         if check_permission(role, "upload"):
-            st.markdown("**📄 Upload Documents**")
+            st.markdown("**Upload Documents**")
             categories  = get_categories(pg_url)
             cat_names   = [c['name'] for c in categories] if categories else ["General"]
             category    = st.selectbox("Category", cat_names, key="upload_category")
@@ -80,7 +80,7 @@ def render_sidebar(pg_url: str, api_key: str, model):
         # Document list
         docs      = get_document_list(pg_url)
         doc_count = len(docs) if docs else 0
-        with st.expander(f"📚 Documents ({doc_count})", expanded=False):
+        with st.expander(f"Documents ({doc_count})", expanded=False):
             if docs:
                 for doc in docs:
                     c1, c2 = st.columns([4, 1])
@@ -88,13 +88,13 @@ def render_sidebar(pg_url: str, api_key: str, model):
                         cat   = doc.get('category','General')
                         ocr_b = '<span class="ocr-badge">OCR</span>' if doc['used_ocr'] else ''
                         st.markdown(
-                            f"<div style='font-size:0.78rem;color:var(--text-2);'>📄 {doc['filename'][:20]}{'...' if len(doc['filename'])>20 else ''}"
-                            f"<br><span style='font-size:0.65rem;color:var(--text-3);'>{doc['chunk_count']} chunks · {cat}</span>{ocr_b}</div>",
+                            f"<div style='font-size:0.78rem;color:rgba(255,255,255,0.85);'>{doc['filename'][:20]}{'...' if len(doc['filename'])>20 else ''}"
+                            f"<br><span style='font-size:0.65rem;color:rgba(255,255,255,0.55);'>{doc['chunk_count']} chunks · {cat}</span>{ocr_b}</div>",
                             unsafe_allow_html=True
                         )
                     with c2:
                         if check_permission(role, "delete"):
-                            if st.button("🗑", key=f"del_{doc['id']}"):
+                            if st.button("Del", key=f"del_{doc['id']}"):
                                 if delete_document(pg_url, doc['id']):
                                     st.session_state.docs_loaded = False
                                     st.rerun()
@@ -117,7 +117,7 @@ def render_sidebar(pg_url: str, api_key: str, model):
         st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
         # History controls
-        if st.button("📜 Load History", use_container_width=True):
+        if st.button("Load Chat History", use_container_width=True):
             rows = load_chat_history(pg_url, user['username'], limit=40)
             st.session_state.messages = [
                 {"role":r['role'],"content":r['content'],
@@ -130,13 +130,13 @@ def render_sidebar(pg_url: str, api_key: str, model):
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("🗑 Clear Chat", use_container_width=True):
+            if st.button("Clear Chat", use_container_width=True):
                 clear_chat_history(pg_url, user['username'])
                 st.session_state.messages       = []
                 st.session_state.history_loaded = False
                 st.rerun()
         with c2:
-            if st.button("🚪 Logout", use_container_width=True):
+            if st.button("Logout", use_container_width=True):
                 st.query_params.clear()
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]

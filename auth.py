@@ -1,5 +1,6 @@
 """
 auth.py — Auth, RBAC, session tokens, session timeout, login UI.
+Login page styled to match SRM Student Portal.
 """
 
 import base64
@@ -64,6 +65,7 @@ def _init_captcha():
     st.session_state.captcha_a   = a
     st.session_state.captcha_b   = b
     st.session_state.captcha_ans = a + b
+    st.session_state.captcha_error = False
 
 
 def check_session_timeout():
@@ -82,45 +84,108 @@ def render_login(pg_url: str):
     if 'captcha_ans' not in st.session_state:
         _init_captcha()
 
-    col_l, col_mid, col_r = st.columns([1, 2, 1])
-    with col_mid:
+    # ── Full-page SRM portal layout ──
+    st.markdown("""
+    <div class="srm-portal-page">
+
+        <!-- SRM Logo Header -->
+        <div class="srm-logo-header">
+            <div class="srm-emblem">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="30" fill="#1a3a7a" stroke="#c8a84b" stroke-width="3"/>
+                    <circle cx="32" cy="32" r="24" fill="none" stroke="#c8a84b" stroke-width="1"/>
+                    <text x="32" y="38" text-anchor="middle" fill="#ffffff" font-size="14"
+                          font-weight="bold" font-family="serif">SRM</text>
+                </svg>
+            </div>
+            <div class="srm-logo-text-block">
+                <div class="srm-logo-name">SRM</div>
+                <div class="srm-logo-sub">INSTITUTE OF SCIENCE &amp; TECHNOLOGY</div>
+                <div class="srm-logo-tagline">Deemed to be University u/s 3 of UGC Act, 1956</div>
+            </div>
+        </div>
+
+        <!-- Two column layout -->
+        <div class="srm-login-outer">
+    """, unsafe_allow_html=True)
+
+    left_col, right_col = st.columns([1, 1])
+
+    with left_col:
         st.markdown("""
-        <div style="text-align:center;padding:20px 0 10px;">
-            <div style="font-size:3rem;">🎓</div>
-            <h2 style="color:var(--teal);font-family:JetBrains Mono,monospace;margin:8px 0 4px;">College AI Assistant</h2>
-            <p style="color:var(--text-3);font-size:0.82rem;">SRM Institute of Science and Technology · CS Department</p>
+        <div class="srm-welcome-panel">
+            <p class="srm-dear">Dear Student,</p>
+            <p class="srm-welcome-line">Welcome to <strong>SRMIST STUDENT PORTAL</strong>.</p>
+            <p class="srm-info">
+                You can access the student portal to know your academic details,
+                query college documents, and get AI-powered answers instantly.
+            </p>
+            <p class="srm-info">
+                SRMIST students can login with their university credentials.
+                (i.e. If your mail ID is <span style="color:#1a4fa0;">abcd@srmist.edu.in</span>,
+                your username is <strong>abcd</strong>)
+            </p>
         </div>
         """, unsafe_allow_html=True)
 
-        if st.session_state.get('remembered_user') and \
-           st.session_state.get('remember_expires', 0) > datetime.now().timestamp():
-            st.info(f"👋 Welcome back, **{st.session_state.remembered_user}**")
+    with right_col:
+        # ── Login card header ──
+        st.markdown("""
+        <div class="srm-card">
+            <div class="srm-card-header">Student Portal</div>
+        """, unsafe_allow_html=True)
 
-        st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-
-        # Sign In / Sign Up tabs
         tab_signin, tab_signup = st.tabs(["Sign In", "Sign Up"])
 
-        # ── SIGN IN ──
         with tab_signin:
+            # Show captcha error if previous attempt was wrong
+            if st.session_state.get('captcha_error'):
+                st.markdown("""
+                <div class="srm-alert-error">
+                    Incorrect captcha. Please solve the verification question again.
+                </div>
+                """, unsafe_allow_html=True)
+
             with st.form("login_form", clear_on_submit=False):
-                username = st.text_input("Username", placeholder="Enter your username")
-                password = st.text_input("Password", placeholder="Enter your password", type="password")
+                # Username input with icon
+                st.markdown('<div class="srm-field-label">Username <span style="font-size:0.75rem;color:var(--text-3);">(without \'@srmist.edu.in\')</span></div>', unsafe_allow_html=True)
+                username = st.text_input("Username", placeholder="Username", label_visibility="collapsed")
+
+                st.markdown('<div class="srm-field-label">Password</div>', unsafe_allow_html=True)
+                password = st.text_input("Password", placeholder="Password", type="password", label_visibility="collapsed")
+
+                # Captcha
                 a = st.session_state.get('captcha_a', '?')
                 b = st.session_state.get('captcha_b', '?')
-                st.markdown(f"**Verification — What is `{a} + {b}` ?**")
-                captcha_answer = st.number_input("Answer", min_value=0, max_value=99, step=1, key="captcha_input")
-                remember       = st.checkbox("Keep me signed in for 7 days")
-                submitted      = st.form_submit_button("Sign In →", use_container_width=True)
+                st.markdown('<div class="srm-field-label">Captcha Verification</div>', unsafe_allow_html=True)
+
+                cap_c1, cap_c2 = st.columns([3, 2])
+                with cap_c1:
+                    captcha_answer = st.number_input(
+                        "Captcha answer", min_value=0, max_value=99, step=1,
+                        key="captcha_input", label_visibility="collapsed",
+                        placeholder="Enter answer"
+                    )
+                with cap_c2:
+                    st.markdown(f"""
+                    <div class="srm-captcha-display">
+                        <span class="srm-captcha-text">{a} + {b} = ?</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                remember  = st.checkbox("Keep me signed in for 7 days")
+                submitted = st.form_submit_button("Login", use_container_width=True)
 
             if submitted:
                 if not username or not password:
                     st.error("Please enter both username and password.")
                 elif int(captcha_answer) != st.session_state.captcha_ans:
-                    st.error("Wrong answer — please try again.")
+                    st.session_state.captcha_error = True
                     _init_captcha()
-                    st.rerun()
+                    st.session_state.captcha_error = True  # keep after _init_captcha resets it
+                    st.error("Incorrect captcha answer. A new question has been generated.")
                 else:
+                    st.session_state.captcha_error = False
                     with st.spinner("Signing in..."):
                         user = authenticate(pg_url, username, password)
                     if user:
@@ -138,19 +203,18 @@ def render_login(pg_url: str):
                         _init_captcha()
 
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-            with st.expander("Demo credentials"):
+            with st.expander("Demo Credentials"):
                 st.markdown(DEMO_CREDENTIALS_NOTE)
 
-        # ── SIGN UP ──
         with tab_signup:
-            st.info("New student accounts are set up as **Student** role. Contact an Admin to get Staff or Admin access.")
+            st.info("New accounts are created as **Student** role. Contact an Admin for Staff or Admin access.")
             with st.form("signup_form", clear_on_submit=True):
                 su_display  = st.text_input("Full Name", placeholder="e.g. Imran Mohamed")
                 su_username = st.text_input("Username", placeholder="Choose a username (no spaces)")
-                su_email    = st.text_input("Email (optional)", placeholder="your@email.com")
+                su_email    = st.text_input("Email (optional)", placeholder="your@srmist.edu.in")
                 su_password = st.text_input("Password", type="password", placeholder="Min 6 characters")
                 su_confirm  = st.text_input("Confirm Password", type="password")
-                su_submit   = st.form_submit_button("Create Account →", use_container_width=True)
+                su_submit   = st.form_submit_button("Create Account", use_container_width=True)
 
             if su_submit:
                 if not su_display or not su_username or not su_password:
@@ -164,9 +228,13 @@ def render_login(pg_url: str):
                 else:
                     ok, msg = add_user(pg_url, su_username, su_password, "student", su_display, su_email)
                     if ok:
-                        st.success(f"Account created! You can now sign in with username: **{su_username}**")
+                        st.success(f"Account created! You can now sign in as: **{su_username}**")
                     else:
                         st.error(msg)
+
+        st.markdown("</div>", unsafe_allow_html=True)  # /srm-card
+
+    st.markdown("</div></div>", unsafe_allow_html=True)  # /srm-login-outer /srm-portal-page
 
 
 def restore_session(pg_url: str):
@@ -186,12 +254,12 @@ def render_onboarding(pg_url: str):
     user  = st.session_state.user
     step  = st.session_state.get('onboard_step', 1)
     steps = [
-        ("👋 Welcome!", f"Hi {user['display']}! Welcome to the College AI Assistant. Let's show you around."),
-        ("💬 Chat", "Ask any question about college documents. The AI will search through uploaded PDFs and give accurate answers."),
-        ("🎤 Voice Input", "Click the microphone button to speak your question instead of typing. Works on Chrome and Edge."),
-        ("📄 Export Answers", "Every AI answer can be saved as a PDF or shared on Telegram using the buttons below each response."),
-        ("🌐 Languages", "You can switch between English, Tamil, and Hindi using the language selector in the chat area."),
-        ("🚀 You're all set!", "Start by asking a question or clicking one of the suggestion chips below the chat!"),
+        ("Welcome!", f"Hi {user['display']}! Welcome to the College AI Assistant. Let's show you around."),
+        ("Chat", "Ask any question about college documents. The AI will search through uploaded PDFs and give accurate answers."),
+        ("Voice Input", "Click the Mic button to speak your question instead of typing. Works on Chrome and Edge."),
+        ("Export Answers", "Every AI answer can be saved as a PDF or shared on Telegram using the buttons below each response."),
+        ("Language Support", "The AI auto-detects your language — ask in English, Tamil, Hindi, or even Tanglish."),
+        ("You're all set!", "Start by asking a question or clicking one of the suggestion chips below the chat!"),
     ]
 
     total = len(steps)
@@ -203,7 +271,7 @@ def render_onboarding(pg_url: str):
         <div class="tour-title">{title}</div>
         <div class="tour-desc">{desc}</div>
         <div style="margin-top:20px;display:flex;justify-content:center;gap:6px;">
-            {''.join(['<div style="width:8px;height:8px;border-radius:50%;background:' + ('var(--teal)' if i+1==step else 'var(--border-2)') + ';display:inline-block;"></div>' for i in range(total)])}
+            {''.join(['<div style="width:8px;height:8px;border-radius:50%;background:' + ('var(--blue)' if i+1==step else 'var(--border-2)') + ';display:inline-block;"></div>' for i in range(total)])}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -211,16 +279,16 @@ def render_onboarding(pg_url: str):
     c1, c2 = st.columns(2)
     with c1:
         if step > 1:
-            if st.button("← Back", use_container_width=True):
+            if st.button("Back", use_container_width=True):
                 st.session_state.onboard_step = step - 1
                 st.rerun()
     with c2:
         if step < total:
-            if st.button("Next →", use_container_width=True):
+            if st.button("Next", use_container_width=True):
                 st.session_state.onboard_step = step + 1
                 st.rerun()
         else:
-            if st.button("Get Started! 🚀", use_container_width=True):
+            if st.button("Get Started", use_container_width=True):
                 mark_onboarded(pg_url, user['username'])
                 st.session_state.user['onboarded'] = True
                 st.session_state.onboard_step = 1
