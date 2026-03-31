@@ -1,6 +1,10 @@
 """
 auth.py — Auth, RBAC, session tokens, session timeout, login UI.
-Login page styled to match SRM Student Portal.
+Login page designed to match SRM Student Portal pixel-for-pixel.
+FIXES:
+  - CSS f-string curly brace escaping fixed (lines with @media)
+  - Captcha bug fixed: wrong answer no longer breaks next attempt
+  - Logo replaced with college image
 """
 
 import base64
@@ -62,14 +66,13 @@ def _decode_token(token: str, pg_url: str):
 def _init_captcha():
     a = random.randint(2, 9)
     b = random.randint(1, 9)
-    st.session_state.captcha_a   = a
-    st.session_state.captcha_b   = b
-    st.session_state.captcha_ans = a + b
+    st.session_state.captcha_a     = a
+    st.session_state.captcha_b     = b
+    st.session_state.captcha_ans   = a + b
     st.session_state.captcha_error = False
 
 
 def check_session_timeout():
-    """Returns True if session has timed out."""
     last = st.session_state.get('last_activity')
     if last is None:
         st.session_state.last_activity = time.time()
@@ -80,119 +83,364 @@ def check_session_timeout():
     return False
 
 
+# ── SVG icon data URIs (URL-encoded) ──
+_ICON_USER = (
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E"
+    "%3Cpath fill='%23b0bec5' d='M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 "
+    "9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z'/%3E%3C/svg%3E"
+)
+_ICON_LOCK = (
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E"
+    "%3Cpath fill='%23b0bec5' d='M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10"
+    "c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 "
+    "2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z'/%3E%3C/svg%3E"
+)
+_ICON_REFRESH = (
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E"
+    "%3Cpath fill='%23b0bec5' d='M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8"
+    "c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6"
+    "c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z'/%3E%3C/svg%3E"
+)
+_ICON_LOCK_BTN = (
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E"
+    "%3Cpath fill='%23ffffff' d='M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10"
+    "c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 "
+    "2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z'/%3E%3C/svg%3E"
+)
+
+# ── REPLACE THIS with your direct image URL ──
+# How to get it:
+#   1. Open your Google Photos link in a browser
+#   2. Right-click the image → "Copy image address"
+#   3. Paste that URL below (must end in .jpg or .png)
+COLLEGE_LOGO_URL = "YOUR_LOGO_URL_HERE"
+
+
 def render_login(pg_url: str):
     if 'captcha_ans' not in st.session_state:
         _init_captcha()
 
-    # ── Full-page SRM portal layout ──
-    st.markdown("""
-    <div class="srm-portal-page">
+    a = st.session_state.get('captcha_a', '?')
+    b = st.session_state.get('captcha_b', '?')
 
-        <!-- SRM Logo Header -->
-        <div class="srm-logo-header">
-            <div class="srm-emblem">
-                <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="32" cy="32" r="30" fill="#1a3a7a" stroke="#c8a84b" stroke-width="3"/>
-                    <circle cx="32" cy="32" r="24" fill="none" stroke="#c8a84b" stroke-width="1"/>
-                    <text x="32" y="38" text-anchor="middle" fill="#ffffff" font-size="14"
-                          font-weight="bold" font-family="serif">SRM</text>
-                </svg>
-            </div>
-            <div class="srm-logo-text-block">
-                <div class="srm-logo-name">SRM</div>
-                <div class="srm-logo-sub">INSTITUTE OF SCIENCE &amp; TECHNOLOGY</div>
-                <div class="srm-logo-tagline">Deemed to be University u/s 3 of UGC Act, 1956</div>
-            </div>
-        </div>
+    # ── Login-page overrides ──
+    st.markdown(f"""
+<style>
+/* ── LOGIN PAGE OVERRIDES ── */
+[data-testid="stSidebar"]        {{ display: none !important; }}
+[data-testid="collapsedControl"] {{ display: none !important; }}
+.stApp, html, body, [class*="css"] {{ background: #e9edf4 !important; }}
+.block-container {{ padding: 0 !important; max-width: 100% !important; }}
 
-        <!-- Two column layout -->
-        <div class="srm-login-outer">
-    """, unsafe_allow_html=True)
+/* SRM header bar */
+.srm-header {{
+    background: #ffffff;
+    border-bottom: 1px solid #d8dde8;
+    padding: 18px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+}}
+.srm-logo-img {{
+    width: 74px;
+    height: 74px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid #c8a84b;
+    flex-shrink: 0;
+    background: #1a3a7a;
+}}
+.srm-brand-block {{ text-align: left; }}
+.srm-brand-name  {{ font-size: 3rem; font-weight: 900; color: #1a3a7a; line-height: 1; letter-spacing: 1px; font-family: 'Inter', sans-serif; }}
+.srm-brand-sub   {{ font-size: 0.78rem; font-weight: 600; color: #1a3a7a; letter-spacing: 0.5px; }}
+.srm-brand-tag   {{ font-size: 0.66rem; color: #888; font-style: italic; margin-top: 1px; }}
 
-    left_col, right_col = st.columns([1, 1])
+/* Page background fix */
+.block-container {{ padding: 8px 1rem 6rem 1rem !important; max-width: 100% !important; }}
+@media (min-width: 768px)  {{ .block-container {{ padding: 8px 2rem 3rem 2rem !important; }} }}
+@media (min-width: 1024px) {{ .block-container {{ padding: 8px 3rem 3rem 3rem !important; }} }}
 
-    with left_col:
+/* Welcome panel (left) */
+.srm-welcome {{ padding: 8px 32px 8px 8px; }}
+.srm-dear    {{ font-size: 1.1rem; font-weight: 700; color: #222; margin-bottom: 10px; }}
+.srm-greet   {{ font-size: 0.9rem; color: #333; margin-bottom: 12px; }}
+.srm-info    {{ font-size: 0.85rem; color: #555; line-height: 1.75; margin-bottom: 10px; }}
+.srm-link    {{ color: #3a7dbf; text-decoration: none; }}
+
+/* Login card (right) */
+.srm-card        {{ background: #fff; border-radius: 4px; box-shadow: 0 2px 18px rgba(0,0,0,0.13); overflow: hidden; }}
+.srm-card-header {{ background: #3a80c0; color: #fff; font-size: 1.05rem; font-weight: 600; padding: 14px 22px; text-align: center; letter-spacing: 0.2px; }}
+
+/* Input field container label */
+.srm-label      {{ font-size: 0.82rem; color: #444; margin-bottom: 4px; margin-top: 12px; }}
+.srm-label-note {{ font-size: 0.75rem; color: #888; }}
+
+/* Native inputs with icons */
+input[placeholder="srm-netid"] {{
+    padding-left: 40px !important;
+    background: #fff url("{_ICON_USER}") no-repeat 11px center / 20px !important;
+    border: 1px solid #ced4da !important;
+    border-radius: 4px !important;
+    color: #333 !important;
+    font-size: 0.9rem !important;
+    min-height: 42px !important;
+}}
+input[placeholder="srm-password"] {{
+    padding-left: 40px !important;
+    background: #fff url("{_ICON_LOCK}") no-repeat 11px center / 18px !important;
+    border: 1px solid #ced4da !important;
+    border-radius: 4px !important;
+    color: #333 !important;
+    font-size: 0.9rem !important;
+    min-height: 42px !important;
+}}
+input[placeholder="srm-captcha"] {{
+    padding-left: 40px !important;
+    background: #fff url("{_ICON_REFRESH}") no-repeat 11px center / 18px !important;
+    border: 1px solid #ced4da !important;
+    border-radius: 4px !important;
+    color: #333 !important;
+    font-size: 0.9rem !important;
+    min-height: 42px !important;
+}}
+input[placeholder="srm-netid"]:focus,
+input[placeholder="srm-password"]:focus,
+input[placeholder="srm-captcha"]:focus {{
+    border-color: #3a80c0 !important;
+    box-shadow: 0 0 0 2px rgba(58,128,192,0.18) !important;
+    outline: none !important;
+}}
+input[placeholder="srm-netid"]::placeholder,
+input[placeholder="srm-password"]::placeholder,
+input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; }}
+
+/* Captcha "image" display */
+.srm-captcha-img {{
+    background: #f5f5f5;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}}
+.srm-captcha-chars {{
+    font-family: 'Georgia', serif;
+    font-size: 1.15rem;
+    font-weight: 900;
+    letter-spacing: 5px;
+    background: linear-gradient(135deg, #c0392b 0%, #8e44ad 40%, #2980b9 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    transform: skewX(-8deg) scaleY(1.08);
+    display: inline-block;
+    filter: drop-shadow(0.5px 0.5px 0 rgba(0,0,0,0.2));
+    user-select: none;
+    padding: 0 6px;
+}}
+.srm-captcha-reload {{
+    display: flex; align-items: center; justify-content: center;
+    width: 42px; height: 42px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: #f5f5f5;
+    cursor: pointer; flex-shrink: 0;
+}}
+
+/* Forgot password */
+.srm-forgot {{ text-align: right; font-size: 0.8rem; margin-top: -4px; margin-bottom: 6px; }}
+.srm-forgot a {{ color: #3a80c0; text-decoration: none; }}
+
+/* Login button */
+.stButton > button {{
+    background: #3a80c0 !important;
+    border: none !important;
+    border-radius: 4px !important;
+    color: #ffffff !important;
+    font-size: 0.95rem !important;
+    font-weight: 600 !important;
+    min-height: 44px !important;
+    padding-left: 20px !important;
+    background-image: url("{_ICON_LOCK_BTN}") !important;
+    background-repeat: no-repeat !important;
+    background-position: calc(50% - 40px) center !important;
+    background-size: 18px !important;
+    transition: background-color 0.2s !important;
+}}
+.stButton > button:hover {{
+    background-color: #2e6dab !important;
+    box-shadow: 0 3px 12px rgba(58,128,192,0.35) !important;
+    transform: none !important;
+}}
+
+/* Error box */
+.srm-error {{
+    background: #fdf0f0;
+    border: 1px solid #e8a0a0;
+    border-left: 4px solid #c0392b;
+    border-radius: 4px;
+    padding: 9px 14px;
+    color: #a93226;
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+}}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {{ border-bottom: 2px solid #e0e6f0 !important; background: transparent !important; }}
+.stTabs [data-baseweb="tab"]      {{ color: #666 !important; font-size: 0.88rem !important; }}
+.stTabs [aria-selected="true"]    {{ color: #3a80c0 !important; border-bottom: 2px solid #3a80c0 !important; font-weight: 600 !important; }}
+
+/* Checkbox */
+.stCheckbox label {{ font-size: 0.82rem !important; color: #555 !important; }}
+.stCheckbox span  {{ font-size: 0.82rem !important; color: #555 !important; }}
+
+/* Form submit button */
+.stFormSubmitButton > button {{
+    background: #3a80c0 !important;
+    border-radius: 4px !important;
+    border: none !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    font-size: 0.95rem !important;
+    min-height: 44px !important;
+    background-image: url("{_ICON_LOCK_BTN}") !important;
+    background-repeat: no-repeat !important;
+    background-position: calc(50% - 36px) center !important;
+    background-size: 16px !important;
+}}
+.stFormSubmitButton > button:hover {{
+    background-color: #2e6dab !important;
+    box-shadow: 0 3px 12px rgba(58,128,192,0.35) !important;
+}}
+</style>
+""", unsafe_allow_html=True)
+
+    # ── SRM Header Logo ──
+    st.markdown(f"""
+<div class="srm-header">
+    <img src="{COLLEGE_LOGO_URL}"
+         class="srm-logo-img"
+         alt="College Logo"
+         onerror="this.style.display='none'">
+    <div class="srm-brand-block">
+        <div class="srm-brand-name">SRM</div>
+        <div class="srm-brand-sub">ARTS AND SCIENCE COLLEGE</div>
+        <div class="srm-brand-tag">CS Department — AI Assistant Portal</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Two-column body ──
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
         st.markdown("""
-        <div class="srm-welcome-panel">
-            <p class="srm-dear">Dear Student,</p>
-            <p class="srm-welcome-line">Welcome to <strong>SRMIST STUDENT PORTAL</strong>.</p>
-            <p class="srm-info">
-                You can access the student portal to know your academic details,
-                query college documents, and get AI-powered answers instantly.
-            </p>
-            <p class="srm-info">
-                SRMIST students can login with their university credentials.
-                (i.e. If your mail ID is <span style="color:#1a4fa0;">abcd@srmist.edu.in</span>,
-                your username is <strong>abcd</strong>)
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+<div class="srm-welcome">
+    <p class="srm-dear">Dear Student,</p>
+    <p class="srm-greet">Welcome to <strong>SRMIST STUDENT PORTAL</strong>.</p>
+    <p class="srm-info">
+        You can access the student portal to know your academic details,
+        query uploaded college documents, and get AI-powered answers instantly.
+    </p>
+    <p class="srm-info">
+        Login with your university username and password.
+        If you do not have an account, use the <strong>Sign Up</strong> tab
+        or contact your department administrator.
+    </p>
+</div>
+""", unsafe_allow_html=True)
 
-    with right_col:
-        # ── Login card header ──
+    with col_right:
         st.markdown("""
-        <div class="srm-card">
-            <div class="srm-card-header">Student Portal</div>
-        """, unsafe_allow_html=True)
+<div class="srm-card">
+    <div class="srm-card-header">Student Portal</div>
+</div>
+""", unsafe_allow_html=True)
 
+        # Tabs — Sign In / Sign Up
         tab_signin, tab_signup = st.tabs(["Sign In", "Sign Up"])
 
+        # ── SIGN IN ──
         with tab_signin:
-            # Show captcha error if previous attempt was wrong
+
             if st.session_state.get('captcha_error'):
-                st.markdown("""
-                <div class="srm-alert-error">
-                    Incorrect captcha. Please solve the verification question again.
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="srm-error">Incorrect captcha answer. '
+                    'A new question has been generated &mdash; please try again.</div>',
+                    unsafe_allow_html=True
+                )
 
             with st.form("login_form", clear_on_submit=False):
-                # Username input with icon
-                st.markdown('<div class="srm-field-label">Username <span style="font-size:0.75rem;color:var(--text-3);">(without \'@srmist.edu.in\')</span></div>', unsafe_allow_html=True)
-                username = st.text_input("Username", placeholder="Username", label_visibility="collapsed")
+                # NetID
+                st.markdown('<div class="srm-label">Username</div>', unsafe_allow_html=True)
+                username = st.text_input(
+                    "netid", placeholder="srm-netid",
+                    label_visibility="collapsed"
+                )
 
-                st.markdown('<div class="srm-field-label">Password</div>', unsafe_allow_html=True)
-                password = st.text_input("Password", placeholder="Password", type="password", label_visibility="collapsed")
+                # Password
+                st.markdown('<div class="srm-label">Password</div>', unsafe_allow_html=True)
+                password = st.text_input(
+                    "password", placeholder="srm-password",
+                    type="password", label_visibility="collapsed"
+                )
+                st.markdown(
+                    '<div class="srm-forgot"><a href="#">Forgot Password?</a></div>',
+                    unsafe_allow_html=True
+                )
 
                 # Captcha
-                a = st.session_state.get('captcha_a', '?')
-                b = st.session_state.get('captcha_b', '?')
-                st.markdown('<div class="srm-field-label">Captcha Verification</div>', unsafe_allow_html=True)
-
-                cap_c1, cap_c2 = st.columns([3, 2])
-                with cap_c1:
+                st.markdown('<div class="srm-label">Captcha</div>', unsafe_allow_html=True)
+                c_input_col, c_img_col, c_reload_col = st.columns([3, 2.2, 0.6])
+                with c_input_col:
                     captcha_answer = st.number_input(
-                        "Captcha answer", min_value=0, max_value=99, step=1,
+                        "captcha", min_value=0, max_value=99, step=1,
                         key="captcha_input", label_visibility="collapsed",
-                        placeholder="Enter answer"
+                        placeholder="srm-captcha"
                     )
-                with cap_c2:
+                with c_img_col:
                     st.markdown(f"""
-                    <div class="srm-captcha-display">
-                        <span class="srm-captcha-text">{a} + {b} = ?</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+<div class="srm-captcha-img">
+    <span class="srm-captcha-chars">{a}+{b}=?</span>
+</div>
+""", unsafe_allow_html=True)
+                with c_reload_col:
+                    st.markdown("""
+<div class="srm-captcha-reload" title="New question">
+    <svg width="20" height="20" viewBox="0 0 24 24">
+        <path fill="#888" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8
+        c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6
+        6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+    </svg>
+</div>
+""", unsafe_allow_html=True)
 
                 remember  = st.checkbox("Keep me signed in for 7 days")
-                submitted = st.form_submit_button("Login", use_container_width=True)
+                submitted = st.form_submit_button("   Login", use_container_width=True)
 
+            # ── FIX: captcha submission logic ──
             if submitted:
                 if not username or not password:
                     st.error("Please enter both username and password.")
                 elif int(captcha_answer) != st.session_state.captcha_ans:
-                    st.session_state.captcha_error = True
+                    # Reset the input widget value and generate new question,
+                    # then rerun so the new question shows and input is cleared.
+                    st.session_state.captcha_input = 0
                     _init_captcha()
-                    st.session_state.captcha_error = True  # keep after _init_captcha resets it
-                    st.error("Incorrect captcha answer. A new question has been generated.")
+                    st.session_state.captcha_error = True
+                    st.rerun()
                 else:
                     st.session_state.captcha_error = False
                     with st.spinner("Signing in..."):
                         user = authenticate(pg_url, username, password)
                     if user:
-                        st.session_state.user           = user
-                        st.session_state.authenticated  = True
-                        st.session_state.last_activity  = time.time()
-                        st.session_state.language       = user.get('language', 'en')
+                        st.session_state.user          = user
+                        st.session_state.authenticated = True
+                        st.session_state.last_activity = time.time()
+                        st.session_state.language      = user.get('language', 'en')
                         st.query_params["sid"] = _make_token(user["username"], user["role"], user["display"])
                         if remember:
                             st.session_state.remembered_user  = username
@@ -202,10 +450,11 @@ def render_login(pg_url: str):
                         st.error("Invalid username or password.")
                         _init_captcha()
 
-            st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+            st.markdown("<hr>", unsafe_allow_html=True)
             with st.expander("Demo Credentials"):
                 st.markdown(DEMO_CREDENTIALS_NOTE)
 
+        # ── SIGN UP ──
         with tab_signup:
             st.info("New accounts are created as **Student** role. Contact an Admin for Staff or Admin access.")
             with st.form("signup_form", clear_on_submit=True):
@@ -228,13 +477,9 @@ def render_login(pg_url: str):
                 else:
                     ok, msg = add_user(pg_url, su_username, su_password, "student", su_display, su_email)
                     if ok:
-                        st.success(f"Account created! You can now sign in as: **{su_username}**")
+                        st.success(f"Account created! Sign in as: **{su_username}**")
                     else:
                         st.error(msg)
-
-        st.markdown("</div>", unsafe_allow_html=True)  # /srm-card
-
-    st.markdown("</div></div>", unsafe_allow_html=True)  # /srm-login-outer /srm-portal-page
 
 
 def restore_session(pg_url: str):
@@ -243,10 +488,10 @@ def restore_session(pg_url: str):
         if token:
             restored = _decode_token(token, pg_url)
             if restored:
-                st.session_state.user           = restored
-                st.session_state.authenticated  = True
-                st.session_state.last_activity  = time.time()
-                st.session_state.language       = restored.get('language', 'en')
+                st.session_state.user          = restored
+                st.session_state.authenticated = True
+                st.session_state.last_activity = time.time()
+                st.session_state.language      = restored.get('language', 'en')
 
 
 def render_onboarding(pg_url: str):

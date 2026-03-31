@@ -2,3 +2,4 @@ api key.txt
 api_key.txt
 __pycache__/
 .txt
+.streamlit/secrets.toml
