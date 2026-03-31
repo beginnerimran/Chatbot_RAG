@@ -1,27 +1,43 @@
 """
-app.py — Main entry point.
-FIXES v3:
-  - Removed dark/light mode toggle
-  - Removed all emojis from header and tabs
-  - SRM blue/white branding throughout
+app.py — Main entry point for SRM College AI Assistant.
 """
 
+import time
 import traceback as _traceback
+
 import streamlit as st
 
 from config import setup_page, SESSION_TIMEOUT_MINUTES
-from database import init_db, get_notifications, mark_notifications_read, get_unread_count
-from auth import render_login, restore_session, check_session_timeout, render_onboarding
+from database import (
+    init_db,
+    get_notifications,
+    mark_notifications_read,
+    get_unread_count,
+)
+from auth import (
+    render_login,
+    restore_session,
+    check_session_timeout,
+    render_onboarding,
+)
 from rag import load_semantic_model
 from sidebar import render_sidebar
 from chat import render_chat
 from dashboard import render_dashboard
-from ui_components import render_docs_panel, render_user_management, render_change_password
-import time
+from ui_components import (
+    render_docs_panel,
+    render_user_management,
+    render_change_password,
+)
 
+
+# -------------------------------------------------------------------
+# Error helpers
+# -------------------------------------------------------------------
 
 def friendly_error(e: Exception) -> str:
     msg = str(e).lower()
+
     if "connection" in msg or "pg_url" in msg or "database" in msg or "psycopg" in msg:
         return "Unable to connect to the database. Please try again in a moment."
     if "groq" in msg or "api key" in msg or "401" in msg:
@@ -41,79 +57,117 @@ def friendly_error(e: Exception) -> str:
     return "Something went wrong. Please refresh the page and try again."
 
 
-def show_error(message: str):
-    st.markdown(f"""
-    <div style="background:rgba(192,57,43,0.07);border:1px solid rgba(192,57,43,0.25);
-                border-left:4px solid #c0392b;border-radius:10px;padding:20px 24px;
-                margin:20px 0;max-width:600px;margin-left:auto;margin-right:auto;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-            <span style="font-size:1rem;font-weight:700;color:#a93226;">Something went wrong</span>
-        </div>
-        <p style="color:#c0392b;font-size:0.88rem;margin:0 0 12px 0;line-height:1.6;">{message}</p>
-        <button onclick="window.location.reload()"
-            style="background:rgba(192,57,43,0.12);border:1px solid rgba(192,57,43,0.35);
-                   color:#a93226;padding:7px 18px;border-radius:6px;cursor:pointer;
-                   font-size:0.82rem;font-family:Inter,sans-serif;">
-            Refresh Page
-        </button>
-    </div>
-    """, unsafe_allow_html=True)
+def show_error(message: str) -> None:
+    st.markdown(
+        f"""
+<div style="
+    background: rgba(192,57,43,0.07);
+    border: 1px solid rgba(192,57,43,0.25);
+    border-left: 4px solid #c0392b;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 20px 0;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+    <span style="font-size:1rem;font-weight:700;color:#a93226;">Something went wrong</span>
+  </div>
+  <p style="color:#c0392b;font-size:0.88rem;margin:0 0 12px 0;line-height:1.6;">
+    {message}
+  </p>
+  <button onclick="window.location.reload()"
+    style="
+      background: rgba(192,57,43,0.12);
+      border: 1px solid rgba(192,57,43,0.35);
+      color: #a93226;
+      padding: 7px 18px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-family: Inter, sans-serif;
+    ">
+    Refresh Page
+  </button>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
+
+# -------------------------------------------------------------------
+# Secrets / safe render
+# -------------------------------------------------------------------
 
 def load_secrets():
     try:
-        return st.secrets["PG_URL"], st.secrets["GROQ_API_KEY"]
+        pg_url = st.secrets["PG_URL"]
+        api_key = st.secrets["GROQ_API_KEY"]
+        return pg_url, api_key
     except Exception:
-        show_error("Configuration missing — PG_URL or GROQ_API_KEY not set in secrets.toml.")
+        show_error("Configuration missing PG_URL or GROQ_API_KEY in secrets.toml.")
         st.stop()
         return None, None
 
 
 def safe_render(fn, *args, **kwargs):
-    """Runs fn, prints real error to terminal, shows friendly message in UI."""
+    """Run a UI function and show a friendly message on error."""
     try:
         fn(*args, **kwargs)
-    except Exception as e:
-        print(f"\n[safe_render ERROR in {fn.__name__}]")
+    except Exception as e:  # noqa: BLE001
+        print(f"[saferender] ERROR in {fn.__name__}")
         _traceback.print_exc()
         show_error(friendly_error(e))
 
 
-def main():
+# -------------------------------------------------------------------
+# Main app
+# -------------------------------------------------------------------
+
+def main() -> None:
+    # Page + theme
     try:
         setup_page()
     except Exception:
+        # Even if setup_page CSS fails, continue rendering minimal UI
         pass
 
+    # Secrets
     pg_url, api_key = load_secrets()
     if not pg_url:
         return
 
+    # Initialise DB once per session
     try:
-        if not st.session_state.get('db_initialised'):
+        if not st.session_state.get("db_initialised"):
             if init_db(pg_url):
-                st.session_state.db_initialised = True
+                st.session_state["db_initialised"] = True
             else:
                 show_error("Unable to connect to the database. Please try again.")
                 st.stop()
                 return
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         show_error(friendly_error(e))
         st.stop()
         return
 
+    # Restore existing session from token (if any)
     try:
         restore_session(pg_url)
     except Exception:
+        # Non-fatal; user can still log in manually
         pass
 
-    if not st.session_state.get('authenticated'):
+    # If not authenticated, show login and exit
+    if not st.session_state.get("authenticated"):
         try:
             render_login(pg_url)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             show_error(friendly_error(e))
         return
 
+    # Session timeout handling
     try:
         if check_session_timeout():
             st.info("Your session has expired. Please sign in again.")
@@ -123,133 +177,148 @@ def main():
             st.rerun()
             return
     except Exception:
+        # If timeout check fails, do nothing special
         pass
 
+    # Load semantic model (may be None -> keyword fallback)
     try:
         model = load_semantic_model()
     except Exception:
         model = None
 
-    user = st.session_state.get('user', {})
-    role = user.get('role', 'student')
+    user = st.session_state.get("user") or {}
+    role = user.get("role", "student")
 
-    if not user.get('onboarded'):
+    # Onboarding tour for first-time users
+    if not user.get("onboarded", True):
         try:
             render_onboarding(pg_url)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             show_error(friendly_error(e))
         return
 
+    # Sidebar (user info, uploads, stats, etc.)
     try:
         render_sidebar(pg_url, api_key, model)
     except Exception:
+        # Sidebar is non‑fatal; keep main UI usable
         pass
 
+    # Unread notifications count
+    unread = 0
     try:
-        unread = get_unread_count(pg_url, user['username'])
+        unread = get_unread_count(pg_url, user.get("username", ""))
     except Exception:
         unread = 0
 
-    # App header — SRM branded, no emojis
-    st.markdown(f"""
-    <div class="app-header">
-        <div class="app-header-title">
-            <span class="srm-logo-text">SRM</span>
-            College AI Assistant
-        </div>
-        <div class="app-header-meta">
-            <span style="color:rgba(255,255,255,0.70);font-size:0.78rem;">CS Department</span>
-            <span class="role-badge role-{role}">{role}</span>
-            <span style="color:#ffffff;font-weight:500;">{user.get('display','')}</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # ------------------------------------------------------------------
+    # Header: title + role + notifications
+    # ------------------------------------------------------------------
+    st.markdown(
+        f"""
+<div class="app-header">
+  <div class="app-header-title">
+    <span class="srm-logo-text">SRM</span>
+    <span>College AI Assistant</span>
+  </div>
+  <div class="app-header-meta">
+    <span style="color:rgba(255,255,255,0.70);font-size:0.78rem;">CS Department</span>
+    <span class="role-badge role-{role}">{role.title()}</span>
+    <span style="color:#ffffff;font-weight:500;">{user.get("display", "")}</span>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
-    # Notifications button only (dark mode toggle removed)
     hc1, hc2 = st.columns([1.5, 10.5])
+
+    # Notifications button (left column)
     with hc1:
         notif_label = f"Notifications ({unread})" if unread > 0 else "Notifications"
         if st.button(notif_label, key="notif_btn", use_container_width=True):
-            st.session_state.show_notifications = not st.session_state.get('show_notifications', False)
-            if st.session_state.show_notifications:
+            st.session_state["show_notifications"] = not st.session_state.get(
+                "show_notifications", False
+            )
+            # Mark as read when opening
+            if st.session_state["show_notifications"]:
                 try:
-                    mark_notifications_read(pg_url, user['username'])
+                    mark_notifications_read(pg_url, user.get("username", ""))
                 except Exception:
                     pass
-            st.rerun()
 
-    if st.session_state.get('show_notifications'):
+    # Notifications list (below header)
+    if st.session_state.get("show_notifications"):
         try:
-            notifs = get_notifications(pg_url, user['username'])
+            notifs = get_notifications(pg_url, user.get("username", ""))
             with st.expander("Notifications", expanded=True):
                 if notifs:
                     for n in notifs:
-                        n_type = n['type'] if n.get('type') else 'info'
-                        ts     = str(n.get('created_at',''))[:16]
-                        st.markdown(f"""
-                        <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.83rem;">
-                            {n.get('message','')} <br>
-                            <span style="font-size:0.65rem;color:var(--text-3);">{ts}</span>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        msg = n.get("message", "")
+                        ts = str(n.get("created_at", ""))[:16]
+                        st.markdown(
+                            f"""
+<div class="notif-item">
+  <div class="notif-message">{msg}</div>
+  <div class="notif-ts">{ts}</div>
+</div>
+""",
+                            unsafe_allow_html=True,
+                        )
                 else:
-                    st.markdown("No notifications yet.")
+                    st.markdown(
+                        '<div class="notif-empty">No notifications yet.</div>',
+                        unsafe_allow_html=True,
+                    )
         except Exception:
             pass
 
-    # ── MOBILE BOTTOM NAV ──
-    active_tab = st.query_params.get("tab", "chat")
+    # ------------------------------------------------------------------
+    # Tabs: Chat / Docs / Dashboard / Users / Account
+    # ------------------------------------------------------------------
     if role == "admin":
-        nav_items = [("Chat","chat"),("Docs","docs"),("Stats","dashboard"),("Users","users"),("Account","account")]
+        chat_tab, docs_tab, dash_tab, users_tab, account_tab = st.tabs(
+            ["Chat", "Docs", "Dashboard", "Users", "Account"]
+        )
     elif role == "staff":
-        nav_items = [("Chat","chat"),("Docs","docs"),("Account","account")]
+        chat_tab, docs_tab, account_tab = st.tabs(["Chat", "Docs", "Account"])
+        dash_tab = users_tab = None  # not used
     else:
-        nav_items = [("Chat","chat"),("Account","account")]
+        chat_tab, account_tab = st.tabs(["Chat", "Account"])
+        docs_tab = dash_tab = users_tab = None  # not used
 
-    nav_html = '<div class="bottom-nav">'
-    for label, key in nav_items:
-        active_cls = "active" if active_tab == key else ""
-        nav_html  += (f'<button class="bottom-nav-btn {active_cls}" '
-                      f'onclick="window.parent.location.href=window.parent.location.pathname+\'?tab={key}\'">'
-                      f'<span class="nav-icon"></span>{label}</button>')
-    nav_html += '</div>'
-    st.markdown(nav_html, unsafe_allow_html=True)
-
-    # ── TABS ──
-    if role == "admin":
-        tabs    = st.tabs(["Chat", "Docs", "Dashboard", "Users", "Account"])
-        tab_map = {"chat":0,"docs":1,"dashboard":2,"users":3,"account":4}
-    elif role == "staff":
-        tabs    = st.tabs(["Chat", "Docs", "Account"])
-        tab_map = {"chat":0,"docs":1,"account":2}
-    else:
-        tabs    = st.tabs(["Chat", "Account"])
-        tab_map = {"chat":0,"account":1}
-
-    with tabs[tab_map["chat"]]:
+    # Chat tab (everyone)
+    with chat_tab:
         safe_render(render_chat, pg_url, api_key, model)
 
-    if role in ("admin", "staff"):
-        with tabs[tab_map["docs"]]:
+    # Docs tab (admin + staff)
+    if role in ("admin", "staff") and docs_tab is not None:
+        with docs_tab:
             safe_render(render_docs_panel, pg_url, role)
 
+    # Dashboard + Users (admin only)
     if role == "admin":
-        with tabs[tab_map["dashboard"]]:
+        with dash_tab:
             safe_render(render_dashboard, pg_url)
-        with tabs[tab_map["users"]]:
-            safe_render(render_user_management, pg_url, user['username'])
+        with users_tab:
+            safe_render(render_user_management, pg_url, user.get("username", ""))
 
-    with tabs[tab_map["account"]]:
-        safe_render(render_change_password, pg_url, user['username'])
+    # Account tab (change password, etc.)
+    with account_tab:
+        safe_render(render_change_password, pg_url, user.get("username", ""))
 
+
+# -------------------------------------------------------------------
+# Streamlit entrypoint
+# -------------------------------------------------------------------
 
 try:
     main()
-except Exception as e:
+except Exception as e:  # noqa: BLE001
     try:
         setup_page()
     except Exception:
         pass
-    print("\n[TOP-LEVEL ERROR]")
+    print("TOP-LEVEL ERROR")
     _traceback.print_exc()
     show_error("The application encountered an unexpected error. Please refresh the page.")
