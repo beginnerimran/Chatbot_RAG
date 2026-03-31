@@ -432,6 +432,13 @@ footer { visibility: hidden; }
   font-size: 0.78rem;
   color: #a93226;
 }
+/* Light, subtle placeholder text for all inputs/textareas */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3) !important;   /* light grey-blue */
+  font-weight: 400 !important;       /* keep it light */
+  opacity: 0.7 !important;           /* softer than normal text */
+}
 </style>
         """,
         unsafe_allow_html=True,
