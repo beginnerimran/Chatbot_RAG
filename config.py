@@ -5,22 +5,23 @@ config.py — Page config, CSS (SRM blue/white theme), constants.
 import hashlib
 import streamlit as st
 
+
 # -------------------------------------------------------------------
-# Seed demo users and login note (same credentials you had)
+# Demo users and constants
 # -------------------------------------------------------------------
 
 SEED_USERS = [
-    ("admin",   hashlib.sha256("admin123".encode()).hexdigest(),   "admin",   "Administrator"),
-    ("staff1",  hashlib.sha256("staff123".encode()).hexdigest(),   "staff",   "Dr. Priya Sharma"),
+    ("admin", hashlib.sha256("admin123".encode()).hexdigest(), "admin", "Administrator"),
+    ("staff1", hashlib.sha256("staff123".encode()).hexdigest(), "staff", "Dr. Priya Sharma"),
     ("student1", hashlib.sha256("student123".encode()).hexdigest(), "student", "Student User"),
-    ("student2", hashlib.sha256("pass1234".encode()).hexdigest(),  "student", "Student User 2"),
+    ("student2", hashlib.sha256("pass1234".encode()).hexdigest(), "student", "Student User 2"),
 ]
 
 DEMO_CREDENTIALS_NOTE = """
-| Username | Password  | Role   |
-|---------|-----------|--------|
-| admin   | admin123  | Admin  |
-| staff1  | staff123  | Staff  |
+| Username | Password | Role   |
+|---------|----------|--------|
+| admin   | admin123 | Admin  |
+| staff1  | staff123 | Staff  |
 | student1| student123| Student|
 """
 
@@ -53,7 +54,7 @@ def setup_page() -> None:
 
 
 # -------------------------------------------------------------------
-# Global CSS (SRM blue/white theme + sidebar toggle + notifications)
+# Global CSS (theme, visibility, sidebar toggle, tabs, notifications)
 # -------------------------------------------------------------------
 
 def inject_css() -> None:
@@ -88,12 +89,14 @@ html, body, .stApp {
   color: var(--text) !important;
 }
 
-/* Hide default Streamlit chrome, but keep sidebar toggle */
+/* Hide Streamlit chrome (menu/footer) but keep sidebar toggle */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 [data-testid="stToolbar"] { visibility: hidden; }
 
-/* --- Always-visible sidebar collapse control (top-left) --- */
+/* ------------------------------------------------------------------
+   Sidebar collapse control — ALWAYS visible at top-left
+-------------------------------------------------------------------*/
 [data-testid="collapsedControl"] {
   visibility: visible !important;
   display: flex !important;
@@ -134,7 +137,9 @@ footer { visibility: hidden; }
   }
 }
 
-/* Sidebar styling */
+/* ------------------------------------------------------------------
+   Sidebar (dark blue) — white text only inside sidebar
+-------------------------------------------------------------------*/
 [data-testid="stSidebar"] {
   background: var(--blue) !important;
   border-right: 1px solid rgba(255,255,255,0.15) !important;
@@ -154,7 +159,19 @@ footer { visibility: hidden; }
   background: rgba(255,255,255,0.28) !important;
 }
 
-/* App header */
+/* ------------------------------------------------------------------
+   Main content: make sure expanders and containers use DARK text
+-------------------------------------------------------------------*/
+[data-testid="stExpander"] * {
+  color: var(--text) !important;
+}
+[data-testid="stMarkdownContainer"] {
+  color: var(--text) !important;
+}
+
+/* ------------------------------------------------------------------
+   App header (top bar after login)
+-------------------------------------------------------------------*/
 .app-header {
   background: var(--blue);
   border-radius: var(--radius);
@@ -211,16 +228,32 @@ footer { visibility: hidden; }
 }
 .role-staff {
   background: rgba(26,79,160,0.12);
-  color: #ffffff;
-  border: 1px solid rgba(255,255,255,0.35);
+  color: #1a4fa0;
+  border: 1px solid rgba(26,79,160,0.25);
 }
 .role-student {
   background: rgba(10,124,78,0.12);
   color: #0a7c4e;
   border: 1px solid rgba(10,124,78,0.25);
 }
+/* When shown INSIDE sidebar we invert them; login page keeps its own styles */
+[data-testid="stSidebar"] .role-badge {
+  background: rgba(255,255,255,0.18) !important;
+  color: #ffffff !important;
+  border-color: rgba(255,255,255,0.3) !important;
+}
 
-/* Chat bubbles (short version of your original) */
+/* ------------------------------------------------------------------
+   Generic cards, chat bubbles, etc.
+-------------------------------------------------------------------*/
+.stat-card, .doc-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
 .chat-user {
   background: var(--blue-dim);
   border: 1px solid var(--blue-b);
@@ -229,6 +262,7 @@ footer { visibility: hidden; }
   margin-left: 8%;
   font-size: 0.92rem;
   line-height: 1.65;
+  color: var(--text);
 }
 .chat-assistant {
   background: var(--card-bg);
@@ -239,18 +273,12 @@ footer { visibility: hidden; }
   margin-right: 8%;
   font-size: 0.92rem;
   line-height: 1.75;
+  color: var(--text);
 }
 
-/* Generic cards */
-.stat-card, .doc-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-  box-shadow: var(--shadow);
-}
-
-/* Inputs */
+/* ------------------------------------------------------------------
+   Inputs and buttons (shared)
+-------------------------------------------------------------------*/
 .stTextInput > div > div > input,
 .stTextArea > div > div > textarea,
 .stNumberInput > div > div > input,
@@ -269,6 +297,8 @@ footer { visibility: hidden; }
   border-color: var(--blue) !important;
   box-shadow: 0 0 0 2px var(--blue-dim) !important;
 }
+
+/* DO NOT touch checkbox colors here — login page (auth.py) controls them */
 
 /* Primary buttons */
 .stButton button,
@@ -294,12 +324,86 @@ footer { visibility: hidden; }
   margin: 12px 0;
 }
 
-/* Notification list (readable text) */
+/* ------------------------------------------------------------------
+   Tabs (Chat / Docs / Dashboard / Users / Account)
+-------------------------------------------------------------------*/
+.stTabs [data-baseweb="tab-list"] {
+  gap: 4px !important;
+  border-bottom: 2px solid var(--border) !important;
+  background: transparent !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+  padding: 10px 18px !important;
+  font-size: 0.88rem !important;
+  font-weight: 500 !important;
+  border-radius: 8px 8px 0 0 !important;
+  color: var(--text-2) !important;
+  background: transparent !important;
+  min-height: 44px !important;
+}
+
+.stTabs [aria-selected="true"] {
+  color: var(--blue) !important;
+  border-bottom: 2px solid var(--blue) !important;
+  font-weight: 600 !important;
+}
+
+/* ------------------------------------------------------------------
+   Bottom mobile nav (when visible)
+-------------------------------------------------------------------*/
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--blue);
+  border-top: 1px solid rgba(255,255,255,0.15);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 6px 0;
+  z-index: 9999;
+  box-shadow: 0 -4px 20px rgba(26,79,160,0.25);
+}
+.bottom-nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 2px;
+  font-size: 0.55rem;
+  color: rgba(255,255,255,0.65);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: Inter, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.bottom-nav-btn .nav-icon {
+  font-size: 1.2rem;
+}
+.bottom-nav-btn.active {
+  color: #ffffff;
+}
+@media (min-width: 768px) {
+  .bottom-nav { display: none !important; }
+}
+
+/* ------------------------------------------------------------------
+   Notifications (expander + rows) — readable, no dark hover
+-------------------------------------------------------------------*/
 .notif-item {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 0.83rem;
   background: #ffffff;
+  color: var(--text);
+}
+.notif-item:hover {
+  background: #f7f9fc;
   color: var(--text);
 }
 .notif-message {
@@ -313,6 +417,20 @@ footer { visibility: hidden; }
 .notif-empty {
   font-size: 0.83rem;
   color: var(--text-2);
+}
+
+/* ------------------------------------------------------------------
+   Mic banner text (when mic is on)
+-------------------------------------------------------------------*/
+.mic-banner {
+  background: rgba(192,57,43,0.06);
+  border: 1px dashed rgba(192,57,43,0.30);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  margin-bottom: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+  color: #a93226;
 }
 </style>
         """,
