@@ -1,13 +1,5 @@
 """
 chat.py — Full chat UI.
-FIXES v3:
-  - Mic fixed: use st.components.v1.html for JS so scripts actually execute
-    (st.markdown strips <script> tags; components.v1.html runs in an iframe that
-    CAN reach parent DOM via window.parent on same-origin Streamlit pages)
-  - Read Aloud: live Stop Speaking button appears while AI is talking
-  - Docs tab: students blocked at app.py level
-  - All widget keys include render_gen to prevent DuplicateWidgetID
-  - Emojis removed throughout
 """
 
 import html as _html
@@ -19,7 +11,6 @@ import urllib.parse
 from datetime import datetime
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from auth import check_permission
 from config import SUGGESTIONS
@@ -29,23 +20,6 @@ from database import (
 )
 from rag import compute_confidence, confidence_html, generate_answer, semantic_search
 
-
-def _transcribe_groq(audio_bytes: bytes, api_key: str) -> str:
-    """Send recorded audio to Groq Whisper for speech-to-text."""
-    import requests as _req
-    try:
-        resp = _req.post(
-            "https://api.groq.com/openai/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
-            data={"model": "whisper-large-v3"},
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            return resp.json().get("text", "").strip()
-    except Exception:
-        pass
-    return ""
 
 
 def _safe_answer_html(text: str) -> str:
@@ -300,179 +274,6 @@ def _followup_chips(msg_key: str):
     """, unsafe_allow_html=True)
 
 
-# ─────────────────────────────────────────────
-# VOICE JS
-# FIX: st.markdown strips <script> tags (innerHTML doesn't execute them).
-# components.v1.html runs in a same-origin iframe; we use window.parent to
-# reach the Streamlit textarea and .chat-assistant bubbles in the parent frame.
-# ─────────────────────────────────────────────
-def _inject_voice_js(mic_active: bool, tts_on: bool, toggle_id: int):
-    tts_js = "true" if tts_on else "false"
-    mic_js = "true" if mic_active else "false"
-    # language=html
-    html_code = f"""
-<!DOCTYPE html>
-<html><body style="margin:0;padding:0;">
-<script>
-(function() {{
-    var uid = 'v{toggle_id}';
-    // Guard: only run once per toggle state
-    if (window.top['_vjs_' + uid]) return;
-    window.top['_vjs_' + uid] = true;
-
-    var ttsOn = {tts_js};
-    var micOn = {mic_js};
-    var doc   = window.parent.document;
-    var synth = window.parent.speechSynthesis;
-
-    // ── TTS ──
-    function speakLast() {{
-        if (!ttsOn || !synth) return;
-        synth.cancel();
-        var msgs = doc.querySelectorAll('.chat-assistant');
-        if (!msgs.length) return;
-        var last = msgs[msgs.length - 1];
-        if (last.dataset.spoken === 'true') return;
-        var clone = last.cloneNode(true);
-        clone.querySelectorAll('.conf-wrap,.src-wrap,.followup-wrap').forEach(function(e) {{ e.remove(); }});
-        var text = clone.textContent.replace(/\\s+/g, ' ').trim().substring(0, 800);
-        var utt  = new SpeechSynthesisUtterance(text);
-        utt.lang = 'en-IN'; utt.rate = 0.92; utt.pitch = 1.0;
-        var voices = synth.getVoices();
-        var voice  = voices.find(function(v) {{ return v.lang === 'en-IN'; }}) ||
-                     voices.find(function(v) {{ return v.lang.startsWith('en'); }}) || voices[0];
-        if (voice) utt.voice = voice;
-        last.dataset.spoken = 'true';
-        utt.onstart = function() {{
-            var b = doc.getElementById('tts-stop-btn');
-            if (b) b.style.display = 'flex';
-        }};
-        utt.onend = utt.onerror = function() {{
-            var b = doc.getElementById('tts-stop-btn');
-            if (b) b.style.display = 'none';
-        }};
-        synth.speak(utt);
-    }}
-
-    // Stop button wiring (parent document)
-    setTimeout(function() {{
-        var stopBtn = doc.getElementById('tts-stop-btn');
-        if (stopBtn) {{
-            stopBtn.onclick = function() {{
-                if (synth) synth.cancel();
-                stopBtn.style.display = 'none';
-                var msgs = doc.querySelectorAll('.chat-assistant');
-                if (msgs.length) msgs[msgs.length - 1].dataset.spoken = 'true';
-            }};
-        }}
-    }}, 600);
-
-    // Watch parent DOM for new AI messages
-    new MutationObserver(function() {{
-        var msgs = doc.querySelectorAll('.chat-assistant');
-        if (!msgs.length) return;
-        var last = msgs[msgs.length - 1];
-        if (last && last.dataset.spoken !== 'true') speakLast();
-    }}).observe(doc.body, {{ childList: true, subtree: true }});
-
-    // ── STT ──
-    if (!micOn) return;
-
-    // Check security context in the PARENT window (the real app)
-    var pLoc     = window.parent.location;
-    var isSecure = pLoc.protocol === 'https:';
-    var isLocal  = pLoc.hostname === 'localhost' || pLoc.hostname === '127.0.0.1';
-
-    var liveEl = doc.getElementById('chat-voice-text');
-
-    if (!isSecure && !isLocal) {{
-        if (liveEl) liveEl.textContent = 'Mic requires HTTPS — works on Streamlit Cloud or localhost.';
-        return;
-    }}
-
-    // Use parent window SpeechRecognition (same origin)
-    var SR = window.parent.SpeechRecognition || window.parent.webkitSpeechRecognition;
-    if (!SR) {{
-        if (liveEl) liveEl.textContent = 'Speech recognition not supported in this browser. Please use Chrome or Edge.';
-        return;
-    }}
-
-    // Stop any existing recognition session
-    if (window.top['_activeRec']) {{
-        try {{ window.top['_activeRec'].stop(); }} catch(e) {{}}
-    }}
-
-    var rec = new SR();
-    window.top['_activeRec'] = rec;
-    rec.lang            = 'en-IN';
-    rec.interimResults  = true;
-    rec.continuous      = false;  // single utterance; we restart on end for reliability
-    rec.maxAlternatives = 1;
-
-    rec.onstart = function() {{
-        if (liveEl) liveEl.textContent = 'Listening — speak now ...';
-    }};
-
-    rec.onresult = function(e) {{
-        var interim = '', final_text = '';
-        for (var i = e.resultIndex; i < e.results.length; i++) {{
-            var t = e.results[i][0].transcript;
-            if (e.results[i].isFinal) final_text += t;
-            else interim += t;
-        }}
-        if (liveEl) liveEl.textContent = final_text || interim || 'Listening ...';
-
-        if (final_text.trim()) {{
-            // Insert transcribed text into Streamlit chat input in the parent doc
-            var inp = doc.querySelector('textarea[data-testid="stChatInputTextArea"]');
-            if (inp) {{
-                var setter = Object.getOwnPropertyDescriptor(
-                    window.parent.HTMLTextAreaElement.prototype, 'value'
-                ).set;
-                setter.call(inp, final_text.trim());
-                inp.dispatchEvent(new window.parent.Event('input', {{ bubbles: true }}));
-                inp.focus();
-                // Trigger send after brief delay
-                setTimeout(function() {{
-                    inp.dispatchEvent(new window.parent.KeyboardEvent('keydown', {{
-                        key: 'Enter', keyCode: 13, bubbles: true
-                    }}));
-                }}, 400);
-            }} else {{
-                if (liveEl) liveEl.textContent = 'Transcribed: ' + final_text.trim() + ' (could not auto-submit — click the chat input and press Enter)';
-            }}
-        }}
-    }};
-
-    rec.onerror = function(e) {{
-        var msg = e.error;
-        if (msg === 'not-allowed') msg = 'Microphone access denied — please allow mic in browser settings.';
-        if (msg === 'no-speech')   msg = 'No speech detected. Please try again.';
-        if (liveEl) liveEl.textContent = 'Mic error: ' + msg;
-        // Restart on recoverable errors
-        if (e.error !== 'not-allowed' && e.error !== 'service-not-allowed') {{
-            setTimeout(function() {{ try {{ rec.start(); }} catch(ex) {{}} }}, 1000);
-        }}
-    }};
-
-    rec.onend = function() {{
-        // Keep listening as long as mic is toggled on
-        if (micOn) {{
-            setTimeout(function() {{ try {{ rec.start(); }} catch(e) {{}} }}, 300);
-        }}
-    }};
-
-    try {{
-        rec.start();
-    }} catch(e) {{
-        if (liveEl) liveEl.textContent = 'Could not start microphone: ' + e.message;
-    }}
-}})();
-</script>
-</body></html>
-"""
-    components.html(html_code, height=0, scrolling=False)
-
 
 # ─────────────────────────────────────────────
 # MAIN CHAT
@@ -590,125 +391,32 @@ def render_chat(pg_url: str, api_key: str, model):
 
     pending = st.session_state.pop('pending_query', None)
 
-    # ── MIC: st.audio_input (Streamlit 1.33+) + Groq Whisper ────────────────
-    # This replaces Web Speech API which was blocked by browsers inside iframes.
-    # st.audio_input works on ALL browsers and ALL platforms (HTTP + HTTPS).
-        # --- Voice input via Groq Whisper (multi‑language) ---
-    colmic, colinput = st.columns([1, 11])
+    # --- Chat input ---
+    prompt = st.chat_input("Ask about your college documents...")
 
-    with colmic:
-        audioval = st.audio_input(
-            "Record",
-            key=f"mic_audio_{gen}",
-            label_visibility="collapsed",
-            help=(
-                "Click to record your question – works with English, Tamil, Hindi, "
-                "Tanglish, Hinglish etc. (Groq Whisper)."
-            ),
-        )
+    # Apply any pending suggestion query
+    if pending and not prompt:
+        prompt = pending
 
-        if audioval is not None:
-            if apikey:
-                with st.spinner("Transcribing..."):
-                    transcript = transcribe_groq_audio_bytes(audioval.read(), apikey)
-                if transcript:
-                    # feed transcribed text into the normal chat flow
-                    st.session_state["pendingquery"] = transcript
-                    st.rerun()
-                else:
-                    st.toast(
-                        "Could not transcribe audio. Please type your question.",
-                        icon="⚠️",
-                    )
-            else:
-                st.toast(
-                    "Groq API key missing – cannot transcribe.",
-                    icon="⚠️",
-                )
+    # --- Export Chat ---
+    if st.session_state.get("messages"):
+        try:
+            mime, ext = _pdf_type()
+            st.download_button(
+                label="Export Chat",
+                data=export_conversation_pdf(
+                    st.session_state["messages"],
+                    user.get("username", ""),
+                ),
+                file_name=f"conversation_{datetime.now().strftime('%Y%m%d_%H%M')}.{ext}",
+                mime=mime,
+                key=f"export_conv_{gen}",
+                use_container_width=True,
+            )
+        except Exception:
+            pass
 
-    # --- Chat input (text box) ---
-    pending = st.session_state.pop("pendingquery", None)
-
-    with colinput:
-        prompt = st.chat_input(
-            "Ask about your college documents..." if not pending else None
-        )
-        # if we have a pending transcript and user has not typed anything,
-        # use the transcript as the prompt
-        if pending and not prompt:
-            prompt = pending
-
-    # --- Read Aloud controls + Export Chat ---
-    ttson = st.session_state.get("ttsenabled", True)
-    c1, c2, c3 = st.columns([2, 2, 2])
-
-    # Read‑aloud toggle
-    with c1:
-        tts_label = "Read Aloud ON" if ttson else "Read Aloud OFF"
-        if st.button(
-            tts_label,
-            key=f"tts_toggle_{gen}",
-            use_container_width=True,
-        ):
-            st.session_state["ttsenabled"] = not ttson
-            st.rerun()
-
-    # Stop‑speaking button (shown/hidden by JS)
-    with c2:
-        st.markdown(
-            """
-            <button id="tts-stop-btn"
-                    style="
-                        display:none;
-                        width:100%;
-                        align-items:center;
-                        justify-content:center;
-                        gap:6px;
-                        padding:10px 0;
-                        border-radius:8px;
-                        font-size:0.85rem;
-                        font-weight:600;
-                        cursor:pointer;
-                        border:none;
-                        min-height:44px;
-                        background:linear-gradient(135deg,#c0392b,#a93226);
-                        color:#fff;
-                        font-family:Inter,sans-serif;
-                    ">
-                Stop Speaking
-            </button>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    # Export whole conversation as PDF
-    with c3:
-        if st.session_state.get("messages"):
-            try:
-                mime, ext = pdftype()
-                st.download_button(
-                    label="Export Chat",
-                    data=exportconversationpdf(
-                        st.session_state["messages"],
-                        user.getusername(),  # keep same user method you already use
-                    ),
-                    file_name=f"conversation_{datetime.now().strftime('%Y%m%d_%H%M')}.{ext}",
-                    mime=mime,
-                    key=f"export_conv_{gen}",
-                    use_container_width=True,
-                )
-            except Exception:
-                # export is optional; ignore failures
-                pass
-
-    # Inject JS for Read‑Aloud only (mic handled by st.audio_input + Groq Whisper)
-    injectvoicejs(
-        micactive=False,  # disable old Web Speech API mic path
-        ttson=ttson,
-        toggleid=st.session_state.get("mictogglecount", 0),
-    )
-
-    # If there is still no prompt (nothing typed and no transcript), do nothing
+    # If no prompt, do nothing
     if not prompt:
         return
 

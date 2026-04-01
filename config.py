@@ -1,6 +1,6 @@
 import hashlib
 import streamlit as st
-from config import setup_page, SESSION_TIMEOUT_MINUTES
+
 # -------------------------------------------------------------------
 # Seed users and demo credentials
 # -------------------------------------------------------------------
@@ -666,8 +666,10 @@ textarea::placeholder {
         """,
         unsafe_allow_html=True,
     )
-    # Backwards‑compat aliases for old app.py
+# Backwards‑compat aliases for old names used in app.py/auth.py
 def setup_page() -> None:
+    # old name, just call new one
     return setuppage()
 
 SESSION_TIMEOUT_MINUTES = SESSIONTIMEOUTMINUTES
+DEMO_CREDENTIALS_NOTE = DEMOCREDENTIALSNOTE
