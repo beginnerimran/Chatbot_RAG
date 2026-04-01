@@ -22,7 +22,7 @@ from auth import (
 )
 from rag import load_semantic_model
 from sidebar import render_sidebar
-from chat import render_chat
+from chat import render_chat, render_summarize
 from dashboard import render_dashboard
 from ui_components import (
     render_docs_panel,
@@ -277,19 +277,23 @@ def main() -> None:
     # Tabs: Chat / Docs / Dashboard / Users / Account
     # ------------------------------------------------------------------
     if role == "admin":
-        chat_tab, docs_tab, dash_tab, users_tab, account_tab = st.tabs(
-            ["Chat", "Docs", "Dashboard", "Users", "Account"]
+        chat_tab, summarize_tab, docs_tab, dash_tab, users_tab, account_tab = st.tabs(
+            ["Chat", "Summarize", "Docs", "Dashboard", "Users", "Account"]
         )
     elif role == "staff":
-        chat_tab, docs_tab, account_tab = st.tabs(["Chat", "Docs", "Account"])
+        chat_tab, summarize_tab, docs_tab, account_tab = st.tabs(["Chat", "Summarize", "Docs", "Account"])
         dash_tab = users_tab = None  # not used
     else:
-        chat_tab, account_tab = st.tabs(["Chat", "Account"])
+        chat_tab, summarize_tab, account_tab = st.tabs(["Chat", "Summarize", "Account"])
         docs_tab = dash_tab = users_tab = None  # not used
 
     # Chat tab (everyone)
     with chat_tab:
         safe_render(render_chat, pg_url, api_key, model)
+
+    # Summarize tab (everyone)
+    with summarize_tab:
+        safe_render(render_summarize, pg_url, api_key, model)
 
     # Docs tab (admin + staff)
     if role in ("admin", "staff") and docs_tab is not None:
