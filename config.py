@@ -85,34 +85,14 @@ html, body, .stApp {
   color: var(--text) !important;
 }
 
-/* Hide Streamlit menu/footer but keep sidebar toggle */
+/* Hide Streamlit menu/footer and all sidebar toggle buttons */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 [data-testid="stToolbar"] { visibility: hidden; }
 
-/* Sidebar collapse control ALWAYS visible at top-left */
-[data-testid="collapsedControl"] {
-  visibility: visible !important;
-  display: flex !important;
-  opacity: 1 !important;
-  position: fixed !important;
-  top: 12px !important;
-  left: 12px !important;
-  z-index: 99999 !important;
-  background: #1a4fa0 !important;
-  border-radius: 999px !important;
-  padding: 6px !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-}
-[data-testid="collapsedControl"] button {
-  color: #ffffff !important;
-}
-[data-testid="stSidebarCollapseButton"] {
-  visibility: visible !important;
-  display: flex !important;
-  opacity: 1 !important;
-  z-index: 99999 !important;
-}
+/* Always hide both sidebar open/close toggle buttons */
+[data-testid="stSidebarCollapseButton"] { display: none !important; }
+[data-testid="collapsedControl"]        { display: none !important; }
 
 /* Layout container */
 .block-container {
@@ -150,6 +130,25 @@ footer { visibility: hidden; }
 [data-testid="stSidebar"] .stButton button:hover {
   background: rgba(255,255,255,0.28) !important;
 }
+
+/* Sidebar selectbox — visible on dark blue background */
+[data-testid="stSidebar"] .stSelectbox label {
+  color: rgba(255,255,255,0.85) !important;
+}
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
+  background: rgba(255,255,255,0.12) !important;
+  border: 1px solid rgba(255,255,255,0.35) !important;
+  border-radius: 8px !important;
+}
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] span,
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] div {
+  color: #ffffff !important;
+}
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] svg { fill: #ffffff !important; }
+[data-baseweb="popover"] [role="listbox"] { background: #1a3a7a !important; }
+[data-baseweb="popover"] [role="option"]  { background: #1a3a7a !important; color: #ffffff !important; }
+[data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="popover"] [aria-selected="true"] { background: #2563c0 !important; color: #ffffff !important; }
 
 /* Main content: make sure expanders and markdown use dark text */
 [data-testid="stExpander"] {
