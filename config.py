@@ -435,9 +435,192 @@ footer { visibility: hidden; }
 /* Light, subtle placeholder text for all inputs/textareas */
 input::placeholder,
 textarea::placeholder {
-  color: var(--text-3) !important;   /* light grey-blue */
-  font-weight: 400 !important;       /* keep it light */
-  opacity: 0.7 !important;           /* softer than normal text */
+  color: var(--text-3) !important;
+  font-weight: 400 !important;
+  opacity: 0.7 !important;
+}
+
+/* ------------------------------------------------------------------
+   Chat bubbles wrapper & label
+-------------------------------------------------------------------*/
+.chat-wrap {
+  margin-bottom: 18px;
+}
+.chat-label {
+  font-size: 0.70rem;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 4px;
+  padding-left: 2px;
+}
+
+/* Status dot (session label) */
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------
+   Confidence bar
+-------------------------------------------------------------------*/
+.conf-wrap {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.conf-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 5px;
+}
+.conf-bg {
+  background: var(--bg-3);
+  border-radius: 99px;
+  height: 6px;
+  width: 100%;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.conf-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.5s ease;
+}
+.conf-high   { background: #00c9a7; }
+.conf-medium { background: #f0a500; }
+.conf-low    { background: #f05252; }
+.conf-pct {
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------
+   Source excerpts
+-------------------------------------------------------------------*/
+.src-wrap {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.src-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 5px;
+}
+.src-text {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  font-family: "JetBrains Mono", monospace;
+  background: var(--bg-3);
+  border-left: 2px solid var(--blue-b);
+  border-radius: 0 4px 4px 0;
+  padding: 5px 9px;
+  margin-bottom: 5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------
+   Follow-up suggestion chips
+-------------------------------------------------------------------*/
+.followup-wrap {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.followup-label {
+  font-size: 0.67rem;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  width: 100%;
+  margin-bottom: 2px;
+}
+.followup-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 13px;
+  border-radius: 20px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--blue);
+  font-size: 0.78rem;
+  cursor: pointer;
+  font-family: Inter, sans-serif;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+.followup-chip:hover {
+  background: var(--blue-dim);
+  border-color: var(--blue);
+}
+
+/* ------------------------------------------------------------------
+   Typing indicator dots
+-------------------------------------------------------------------*/
+.typing-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--blue);
+  border-radius: 50%;
+  margin: 0 2px;
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(1) { animation-delay: 0s; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+  30%           { transform: translateY(-7px); opacity: 1; }
+}
+
+/* ------------------------------------------------------------------
+   Alert banners (error / warn / info)
+-------------------------------------------------------------------*/
+.alert-error {
+  background: rgba(240,82,82,0.09);
+  border: 1px solid rgba(240,82,82,0.30);
+  color: #c0392b;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  margin: 6px 0;
+}
+.alert-warn {
+  background: rgba(240,165,0,0.09);
+  border: 1px solid rgba(240,165,0,0.30);
+  color: #a0610a;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  margin: 6px 0;
+}
+.alert-info {
+  background: rgba(26,79,160,0.07);
+  border: 1px solid rgba(26,79,160,0.20);
+  color: var(--blue);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  margin: 6px 0;
 }
 </style>
         """,

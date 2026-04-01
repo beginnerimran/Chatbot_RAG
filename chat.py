@@ -10,8 +10,10 @@ FIXES v3:
   - Emojis removed throughout
 """
 
+import html as _html
 import io
 import json
+import re
 import time
 import urllib.parse
 from datetime import datetime
@@ -26,6 +28,79 @@ from database import (
     save_feedback, check_rate_limit, update_last_active
 )
 from rag import compute_confidence, confidence_html, generate_answer, semantic_search
+
+
+def _safe_answer_html(text: str) -> str:
+    """
+    Convert an AI answer (which may contain markdown) to safe HTML
+    that can be embedded inside an HTML string without breaking it.
+
+    Strategy:
+      1. Strip/replace characters that confuse Streamlit's markdown-inside-HTML
+         parser (backticks are the main culprit — they create code blocks that
+         swallow everything after them including the confidence bar HTML).
+      2. Convert the most common markdown constructs to HTML equivalents so
+         bullet-point answers still look good.
+      3. Escape any remaining HTML-special characters.
+    """
+    t = str(text)
+
+    # ── 1. Convert fenced code blocks FIRST (``` ... ```) ──────────────────
+    # Replace with a styled <pre> so they still look like code
+    def fenced_to_pre(m):
+        code = _html.escape(m.group(2).strip())
+        return f'<pre style="background:var(--bg-3);padding:8px 10px;border-radius:6px;font-size:0.78rem;overflow-x:auto;white-space:pre-wrap;">{code}</pre>'
+    t = re.sub(r'```(\w*)\n?(.*?)```', fenced_to_pre, t, flags=re.DOTALL)
+
+    # ── 2. Convert inline code (`word`) ─────────────────────────────────────
+    t = re.sub(r'`([^`]+)`', lambda m: f'<code style="background:var(--bg-3);padding:1px 5px;border-radius:4px;font-size:0.85em;">{_html.escape(m.group(1))}</code>', t)
+
+    # ── 3. Escape remaining HTML-special chars BEFORE adding our own tags ───
+    # Split on our safe tags so we don't escape the HTML we just inserted
+    # Simple approach: escape everything that's not inside < >
+    parts = re.split(r'(<[^>]+>)', t)
+    escaped_parts = []
+    for p in parts:
+        if p.startswith('<') and p.endswith('>'):
+            escaped_parts.append(p)          # already a tag — leave it
+        else:
+            escaped_parts.append(_html.escape(p))
+    t = ''.join(escaped_parts)
+
+    # ── 4. Markdown → HTML (on the escaped text) ────────────────────────────
+    # Bold  **text** / __text__
+    t = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', t)
+    t = re.sub(r'__(.+?)__',     r'<strong>\1</strong>', t)
+    # Italic  *text* / _text_
+    t = re.sub(r'\*(.+?)\*',     r'<em>\1</em>', t)
+    t = re.sub(r'_([^_]+)_',     r'<em>\1</em>', t)
+
+    # ── 5. Bullet lists ─────────────────────────────────────────────────────
+    lines     = t.split('\n')
+    out_lines = []
+    in_list   = False
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith('- ') or stripped.startswith('• '):
+            if not in_list:
+                out_lines.append('<ul style="margin:6px 0 6px 18px;padding:0;">')
+                in_list = True
+            item = stripped[2:]
+            out_lines.append(f'<li style="margin-bottom:3px;">{item}</li>')
+        else:
+            if in_list:
+                out_lines.append('</ul>')
+                in_list = False
+            out_lines.append(line)
+    if in_list:
+        out_lines.append('</ul>')
+
+    # ── 6. Newlines → <br/> (outside list tags) ─────────────────────────────
+    result = '\n'.join(out_lines)
+    # Replace remaining plain newlines with <br/>
+    result = re.sub(r'\n(?!<[uo]l|<li|</[uo]l)', '<br/>', result)
+
+    return result
 
 
 FOLLOWUP_PROMPTS = [
@@ -128,15 +203,24 @@ def _pdf_type():
 def _action_row(answer: str, msg_key: str, question: str, username: str, pg_url: str):
     mime, ext = _pdf_type()
     tg_text   = f"College AI Assistant\n\nQ: {question}\n\nA: {answer}\n\nSRM CS Dept"
-    tg_url    = f"https://t.me/share/url?url=&text={urllib.parse.quote(tg_text)}"
+    tg_enc    = urllib.parse.quote(tg_text)
+    tg_deep   = f"tg://msg?text={tg_enc}"      # opens Telegram desktop / mobile app
+    tg_web    = f"https://t.me/share/url?url=&text={tg_enc}"  # web fallback
 
     st.markdown(f"""
     <div style="margin-top:8px;margin-bottom:4px;">
-        <a href="{tg_url}" target="_blank"
+        <a href="#"
+           onclick="(function(){{
+               var tried = false;
+               window.location.href = '{tg_deep}';
+               setTimeout(function(){{
+                   if (!tried) {{ tried = true; window.open('{tg_web}', '_blank'); }}
+               }}, 1500);
+           }})(); return false;"
            style="display:inline-flex;align-items:center;gap:5px;padding:5px 14px;
                   border-radius:6px;font-size:0.78rem;font-weight:500;
                   border:1px solid var(--border-2);background:var(--bg-3);
-                  color:var(--text-2);text-decoration:none;">
+                  color:var(--text-2);text-decoration:none;cursor:pointer;">
             Share on Telegram
         </a>
     </div>
@@ -424,7 +508,7 @@ def render_chat(pg_url: str, api_key: str, model):
             st.markdown(f"""
             <div class="chat-wrap">
                 <div class="chat-label">You</div>
-                <div class="chat-user">{msg.get('content','')}</div>
+                <div class="chat-user">{_html.escape(str(msg.get('content','')))}</div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -447,7 +531,7 @@ def render_chat(pg_url: str, api_key: str, model):
             <div class="chat-wrap">
                 <div class="chat-label">AI Assistant</div>
                 <div class="chat-assistant">
-                    {msg.get('content','')}
+                    {_safe_answer_html(msg.get('content',''))}
                     {conf_str}
                     {src_str}
                 </div>
@@ -568,7 +652,7 @@ def render_chat(pg_url: str, api_key: str, model):
     st.markdown(f"""
     <div class="chat-wrap">
         <div class="chat-label">You</div>
-        <div class="chat-user">{prompt}</div>
+        <div class="chat-user">{_html.escape(str(prompt))}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -626,7 +710,7 @@ def render_chat(pg_url: str, api_key: str, model):
     <div class="chat-wrap">
         <div class="chat-label">AI Assistant</div>
         <div class="chat-assistant">
-            {answer}
+            {_safe_answer_html(answer)}
             {confidence_html(confidence)}
             {src_str}
         </div>
