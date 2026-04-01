@@ -48,7 +48,7 @@ def render_user_management(pg_url: str, current_username: str):
     st.markdown("### User Management")
 
     with st.expander("Add New User", expanded=False):
-        with st.form("add_user_form"):
+        with st.form("add_user_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
                 new_uname   = st.text_input("Username")

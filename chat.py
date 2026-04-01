@@ -30,75 +30,103 @@ from database import (
 from rag import compute_confidence, confidence_html, generate_answer, semantic_search
 
 
+def _transcribe_groq(audio_bytes: bytes, api_key: str) -> str:
+    """Send recorded audio to Groq Whisper for speech-to-text."""
+    import requests as _req
+    try:
+        resp = _req.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": ("audio.wav", audio_bytes, "audio/wav")},
+            data={"model": "whisper-large-v3"},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("text", "").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _safe_answer_html(text: str) -> str:
     """
-    Convert an AI answer (which may contain markdown) to safe HTML
-    that can be embedded inside an HTML string without breaking it.
+    Convert AI answer markdown → safe HTML for embedding in st.markdown HTML blocks.
 
-    Strategy:
-      1. Strip/replace characters that confuse Streamlit's markdown-inside-HTML
-         parser (backticks are the main culprit — they create code blocks that
-         swallow everything after them including the confidence bar HTML).
-      2. Convert the most common markdown constructs to HTML equivalents so
-         bullet-point answers still look good.
-      3. Escape any remaining HTML-special characters.
+    Uses a placeholder strategy so code blocks are extracted first,
+    text is HTML-escaped, markdown is converted, then placeholders restored.
+    This prevents backticks / asterisks from breaking Streamlit's parser.
     """
     t = str(text)
+    saved: list[str] = []
 
-    # ── 1. Convert fenced code blocks FIRST (``` ... ```) ──────────────────
-    # Replace with a styled <pre> so they still look like code
-    def fenced_to_pre(m):
+    # ── 1. Extract fenced code blocks into placeholders ──────────────────────
+    def save_fenced(m):
         code = _html.escape(m.group(2).strip())
-        return f'<pre style="background:var(--bg-3);padding:8px 10px;border-radius:6px;font-size:0.78rem;overflow-x:auto;white-space:pre-wrap;">{code}</pre>'
-    t = re.sub(r'```(\w*)\n?(.*?)```', fenced_to_pre, t, flags=re.DOTALL)
+        html = (
+            '<pre style="background:var(--bg-3);padding:8px 10px;border-radius:6px;'
+            'font-size:0.78rem;overflow-x:auto;white-space:pre-wrap;margin:6px 0;">'
+            f'{code}</pre>'
+        )
+        saved.append(html)
+        return f"\x00PH{len(saved)-1}\x00"
 
-    # ── 2. Convert inline code (`word`) ─────────────────────────────────────
-    t = re.sub(r'`([^`]+)`', lambda m: f'<code style="background:var(--bg-3);padding:1px 5px;border-radius:4px;font-size:0.85em;">{_html.escape(m.group(1))}</code>', t)
+    t = re.sub(r'```(\w*)\n?(.*?)```', save_fenced, t, flags=re.DOTALL)
 
-    # ── 3. Escape remaining HTML-special chars BEFORE adding our own tags ───
-    # Split on our safe tags so we don't escape the HTML we just inserted
-    # Simple approach: escape everything that's not inside < >
-    parts = re.split(r'(<[^>]+>)', t)
-    escaped_parts = []
-    for p in parts:
-        if p.startswith('<') and p.endswith('>'):
-            escaped_parts.append(p)          # already a tag — leave it
-        else:
-            escaped_parts.append(_html.escape(p))
-    t = ''.join(escaped_parts)
+    # ── 2. Extract inline code into placeholders ─────────────────────────────
+    def save_inline(m):
+        code = _html.escape(m.group(1))
+        html = (
+            '<code style="background:var(--bg-3);padding:1px 5px;border-radius:4px;'
+            f'font-size:0.85em;font-family:JetBrains Mono,monospace;">{code}</code>'
+        )
+        saved.append(html)
+        return f"\x00PH{len(saved)-1}\x00"
 
-    # ── 4. Markdown → HTML (on the escaped text) ────────────────────────────
-    # Bold  **text** / __text__
-    t = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', t)
-    t = re.sub(r'__(.+?)__',     r'<strong>\1</strong>', t)
-    # Italic  *text* / _text_
-    t = re.sub(r'\*(.+?)\*',     r'<em>\1</em>', t)
-    t = re.sub(r'_([^_]+)_',     r'<em>\1</em>', t)
+    t = re.sub(r'`([^`\n]+)`', save_inline, t)
 
-    # ── 5. Bullet lists ─────────────────────────────────────────────────────
+    # ── 3. Process line by line: bullets + HTML-escape + inline markdown ─────
+    def apply_inline_md(s: str) -> str:
+        s = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+        s = re.sub(r'__(.+?)__',     r'<strong>\1</strong>', s)
+        # Italic — only *word* not inside ** (avoid matching lone asterisks)
+        s = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'<em>\1</em>', s)
+        return s
+
     lines     = t.split('\n')
     out_lines = []
     in_list   = False
+
     for line in lines:
         stripped = line.lstrip()
-        if stripped.startswith('- ') or stripped.startswith('• '):
+        # Detect bullet: lines starting with "* ", "- ", or "• "
+        bullet_m = re.match(r'^([*\-•])\s+(.*)$', stripped)
+        if bullet_m:
             if not in_list:
                 out_lines.append('<ul style="margin:6px 0 6px 18px;padding:0;">')
                 in_list = True
-            item = stripped[2:]
+            item = _html.escape(bullet_m.group(2))
+            item = apply_inline_md(item)
             out_lines.append(f'<li style="margin-bottom:3px;">{item}</li>')
         else:
             if in_list:
                 out_lines.append('</ul>')
                 in_list = False
-            out_lines.append(line)
+            safe = _html.escape(line)
+            safe = apply_inline_md(safe)
+            out_lines.append(safe)
+
     if in_list:
         out_lines.append('</ul>')
 
-    # ── 6. Newlines → <br/> (outside list tags) ─────────────────────────────
+    # ── 4. Join and convert plain newlines → <br/> (skip around list tags) ───
     result = '\n'.join(out_lines)
-    # Replace remaining plain newlines with <br/>
-    result = re.sub(r'\n(?!<[uo]l|<li|</[uo]l)', '<br/>', result)
+    result = re.sub(r'\n(<[uo]l)',    r'\1',    result)   # no <br/> before <ul>/<ol>
+    result = re.sub(r'(</[uo]l>)\n', r'\1',    result)   # no <br/> after </ul>/<ol>
+    result = result.replace('\n', '<br/>')
+
+    # ── 5. Restore code block placeholders ───────────────────────────────────
+    for i, block in enumerate(saved):
+        result = result.replace(f'\x00PH{i}\x00', block)
 
     return result
 
@@ -562,21 +590,46 @@ def render_chat(pg_url: str, api_key: str, model):
 
     pending = st.session_state.pop('pending_query', None)
 
+    # ── MIC: st.audio_input (Streamlit 1.33+) + Groq Whisper ────────────────
+    # This replaces Web Speech API which was blocked by browsers inside iframes.
+    # st.audio_input works on ALL browsers and ALL platforms (HTTP + HTTPS).
     col_mic, col_input = st.columns([1, 11])
     with col_mic:
-        mic_active = st.session_state.get('mic_active', False)
-        mic_label  = "Stop Mic" if mic_active else "Mic"
-        if st.button(mic_label, key=f"mic_toggle_{gen}",
-                     help="Mic requires Chrome or Edge. On mobile it only works over HTTPS.",
-                     use_container_width=True):
-            st.session_state.mic_active       = not mic_active
-            st.session_state.mic_toggle_count = st.session_state.get('mic_toggle_count', 0) + 1
-            st.rerun()
+        if hasattr(st, 'audio_input'):
+            audio_val = st.audio_input(
+                "Record",
+                key=f"mic_audio_{gen}",
+                label_visibility="collapsed",
+                help="Click to record your question — works in all browsers",
+            )
+            if audio_val is not None:
+                if api_key:
+                    with st.spinner("Transcribing..."):
+                        transcript = _transcribe_groq(audio_val.read(), api_key)
+                    if transcript:
+                        st.session_state.pending_query = transcript
+                        st.rerun()
+                    else:
+                        st.toast("Could not transcribe audio. Please type your question.", icon="⚠️")
+                else:
+                    st.toast("Groq API key missing — cannot transcribe.", icon="⚠️")
+        else:
+            # Fallback for Streamlit < 1.33
+            mic_active = st.session_state.get('mic_active', False)
+            mic_label  = "Stop Mic" if mic_active else "Mic"
+            if st.button(mic_label, key=f"mic_toggle_{gen}",
+                         help="Requires Chrome/Edge over HTTPS. Upgrade Streamlit for better mic support.",
+                         use_container_width=True):
+                st.session_state.mic_active       = not mic_active
+                st.session_state.mic_toggle_count = st.session_state.get('mic_toggle_count', 0) + 1
+                st.rerun()
+            if st.session_state.get('mic_active'):
+                st.markdown("""
+                <div class="mic-banner">Mic active &mdash; <span id="chat-voice-text">Initialising...</span></div>
+                """, unsafe_allow_html=True)
 
-    if st.session_state.get('mic_active'):
-        st.markdown("""
-        <div class="mic-banner">Microphone active &mdash; <span id="chat-voice-text">Initialising...</span></div>
-        """, unsafe_allow_html=True)
+    # Re-read pending after possible audio transcription rerun
+    pending = st.session_state.pop('pending_query', pending)
 
     with col_input:
         prompt = st.chat_input("Ask about your college documents...") or pending
@@ -615,8 +668,9 @@ def render_chat(pg_url: str, api_key: str, model):
             except Exception:
                 pass
 
+    # TTS voice JS — always inject for Read Aloud; old-STT JS only in fallback mode
     _inject_voice_js(
-        mic_active=st.session_state.get('mic_active', False),
+        mic_active=st.session_state.get('mic_active', False) if not hasattr(st, 'audio_input') else False,
         tts_on=tts_on,
         toggle_id=st.session_state.get('mic_toggle_count', 0)
     )

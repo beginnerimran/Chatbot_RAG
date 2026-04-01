@@ -316,6 +316,37 @@ footer { visibility: hidden; }
   background: linear-gradient(135deg, #2563c0, #3478d4) !important;
   box-shadow: 0 4px 16px rgba(26,79,160,0.30) !important;
 }
+/* Prevent black/dark colour on click and focus — this is the fix */
+.stButton > button:active,
+.stButton > button:focus,
+.stButton > button:focus-visible,
+.stButton > button:focus:not(:focus-visible),
+.stFormSubmitButton > button:active,
+.stFormSubmitButton > button:focus,
+.stFormSubmitButton > button:focus-visible {
+  background: linear-gradient(135deg, #1a4fa0, #2563c0) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 10px rgba(26,79,160,0.25) !important;
+  border: none !important;
+  outline: none !important;
+}
+/* Sidebar buttons on click */
+[data-testid="stSidebar"] .stButton > button:active,
+[data-testid="stSidebar"] .stButton > button:focus,
+[data-testid="stSidebar"] .stButton > button:focus-visible {
+  background: rgba(255,255,255,0.28) !important;
+  color: #ffffff !important;
+  outline: none !important;
+  border-color: rgba(255,255,255,0.25) !important;
+}
+/* Download buttons */
+.stDownloadButton > button:active,
+.stDownloadButton > button:focus,
+.stDownloadButton > button:focus-visible {
+  background: linear-gradient(135deg, #1a4fa0, #2563c0) !important;
+  color: #ffffff !important;
+  outline: none !important;
+}
 
 /* Divider */
 .divider {
