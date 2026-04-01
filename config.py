@@ -1,13 +1,8 @@
-"""
-config.py — Page config, CSS (SRM blue/white theme), constants.
-"""
-
 import hashlib
 import streamlit as st
-
-
+from config import setup_page, SESSION_TIMEOUT_MINUTES
 # -------------------------------------------------------------------
-# Demo users and constants
+# Seed users and demo credentials
 # -------------------------------------------------------------------
 
 SEED_USERS = [
@@ -17,12 +12,14 @@ SEED_USERS = [
     ("student2", hashlib.sha256("pass1234".encode()).hexdigest(), "student", "Student User 2"),
 ]
 
-DEMO_CREDENTIALS_NOTE = """
-| Username | Password | Role   |
-|---------|----------|--------|
-| admin   | admin123 | Admin  |
-| staff1  | staff123 | Staff  |
-| student1| student123| Student|
+DEMOCREDENTIALSNOTE = """
+**Demo Credentials**
+
+| Username  | Password  | Role    |
+|----------|-----------|---------|
+| admin    | admin123  | Admin   |
+| staff1   | staff123  | Staff   |
+| student1 | student123| Student |
 """
 
 SUGGESTIONS = [
@@ -36,67 +33,64 @@ SUGGESTIONS = [
     "What are the library timings?",
 ]
 
-SESSION_TIMEOUT_MINUTES = 30
+SESSIONTIMEOUTMINUTES = 30
 
 
 # -------------------------------------------------------------------
-# Page setup
+# Page config and CSS
 # -------------------------------------------------------------------
 
-def setup_page() -> None:
+def setuppage() -> None:
+    """Set Streamlit page config and inject global CSS."""
     st.set_page_config(
         page_title="SRM College AI Assistant",
-        page_icon="data:image/svg+xml,S",
+        page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text x='4' y='17' font-size='14' font-family='sans-serif'>S</text></svg>",
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    inject_css()
+    injectcss()
 
 
-# -------------------------------------------------------------------
-# Global CSS (theme, visibility, sidebar toggle, tabs, notifications)
-# -------------------------------------------------------------------
-
-def inject_css() -> None:
+def injectcss() -> None:
+    """Inject global CSS theme and component overrides."""
     st.markdown(
         """
 <style>
 :root {
-  --bg: #f0f4fa;
-  --bg-2: #ffffff;
-  --bg-3: #e8eef7;
-  --border: #d0dbeF;
-  --border-2: #b8c9e0;
-  --text: #1a2640;
-  --text-2: #3d5275;
-  --text-3: #6b82a0;
-  --card-bg: #ffffff;
-  --input-bg: #f7f9fc;
-  --blue: #1a4fa0;
-  --blue-2: #2563c0;
-  --blue-dim: rgba(26,79,160,0.08);
-  --blue-b: rgba(26,79,160,0.20);
-  --radius: 12px;
+  --bg:        #f0f4fa;
+  --bg-2:      #ffffff;
+  --bg-3:      #e8eef7;
+  --border:    #d0dbeF;
+  --border-2:  #b8c9e0;
+  --text:      #1a2640;
+  --text-2:    #3d5275;
+  --text-3:    #6b82a0;
+  --card-bg:   #ffffff;
+  --input-bg:  #f7f9fc;
+  --blue:      #1a4fa0;
+  --blue-2:    #2563c0;
+  --blue-dim:  rgba(26,79,160,0.08);
+  --blue-b:    rgba(26,79,160,0.20);
+  --radius:    12px;
   --radius-sm: 8px;
-  --shadow: 0 2px 16px rgba(26,79,160,0.10);
+  --shadow:    0 2px 16px rgba(26,79,160,0.10);
   --shadow-lg: 0 4px 32px rgba(26,79,160,0.14);
 }
 
 /* Base */
 html, body, .stApp {
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+               sans-serif !important;
   background: var(--bg) !important;
   color: var(--text) !important;
 }
 
-/* Hide Streamlit chrome (menu/footer) but keep sidebar toggle */
+/* Hide Streamlit menu/footer but keep sidebar toggle */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 [data-testid="stToolbar"] { visibility: hidden; }
 
-/* ------------------------------------------------------------------
-   Sidebar collapse control — ALWAYS visible at top-left
--------------------------------------------------------------------*/
+/* Sidebar collapse control ALWAYS visible at top-left */
 [data-testid="collapsedControl"] {
   visibility: visible !important;
   display: flex !important;
@@ -120,7 +114,7 @@ footer { visibility: hidden; }
   z-index: 99999 !important;
 }
 
-/* Layout */
+/* Layout container */
 .block-container {
   padding: 1rem 1rem 6rem 1rem !important;
   max-width: 100% !important;
@@ -137,9 +131,7 @@ footer { visibility: hidden; }
   }
 }
 
-/* ------------------------------------------------------------------
-   Sidebar (dark blue) — white text only inside sidebar
--------------------------------------------------------------------*/
+/* Sidebar dark blue; white text only inside sidebar */
 [data-testid="stSidebar"] {
   background: var(--blue) !important;
   border-right: 1px solid rgba(255,255,255,0.15) !important;
@@ -147,7 +139,7 @@ footer { visibility: hidden; }
 [data-testid="stSidebar"] > div {
   padding: 1.2rem 1rem !important;
 }
-[data-testid="stSidebar"] * {
+[data-testid="stSidebar"] {
   color: rgba(255,255,255,0.95) !important;
 }
 [data-testid="stSidebar"] .stButton button {
@@ -159,19 +151,45 @@ footer { visibility: hidden; }
   background: rgba(255,255,255,0.28) !important;
 }
 
-/* ------------------------------------------------------------------
-   Main content: make sure expanders and containers use DARK text
--------------------------------------------------------------------*/
-[data-testid="stExpander"] * {
+/* Main content: make sure expanders and markdown use dark text */
+[data-testid="stExpander"] {
   color: var(--text) !important;
+  background: var(--bg-2) !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow) !important;
+  overflow: hidden !important;
 }
+
+/* Expander header (fix the black bar) */
+[data-testid="stExpander"] [data-baseweb="accordion"] {
+  background: var(--bg-2) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stExpander"] [data-baseweb="accordion"] button {
+  background: var(--bg-2) !important;
+  color: var(--text) !important;
+  font-weight: 600 !important;
+  font-size: 0.90rem !important;
+  padding: 10px 16px !important;
+}
+[data-testid="stExpander"] [data-baseweb="accordion"] button:hover {
+  background: #e2e8f5 !important;
+}
+[data-testid="stExpander"] [data-baseweb="accordion"] button:focus,
+[data-testid="stExpander"] [data-baseweb="accordion"] button:active {
+  outline: none !important;
+  box-shadow: none !important;
+  background: #dde6f7 !important;
+}
+
 [data-testid="stMarkdownContainer"] {
   color: var(--text) !important;
 }
 
-/* ------------------------------------------------------------------
-   App header (top bar after login)
--------------------------------------------------------------------*/
+/* App header */
 .app-header {
   background: var(--blue);
   border-radius: var(--radius);
@@ -198,7 +216,6 @@ footer { visibility: hidden; }
   gap: 10px;
   font-size: 0.8rem;
   color: rgba(255,255,255,0.8);
-  flex-wrap: wrap;
 }
 .srm-logo-text {
   background: rgba(255,255,255,0.16);
@@ -236,30 +253,28 @@ footer { visibility: hidden; }
   color: #0a7c4e;
   border: 1px solid rgba(10,124,78,0.25);
 }
-/* When shown INSIDE sidebar we invert them; login page keeps its own styles */
+/* When shown inside sidebar invert */
 [data-testid="stSidebar"] .role-badge {
   background: rgba(255,255,255,0.18) !important;
   color: #ffffff !important;
   border-color: rgba(255,255,255,0.3) !important;
 }
 
-/* ------------------------------------------------------------------
-   Generic cards, chat bubbles, etc.
--------------------------------------------------------------------*/
-.stat-card, .doc-card {
+/* Generic cards, chat bubbles, etc. */
+.stat-card,
+.doc-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 12px 14px;
   box-shadow: var(--shadow);
 }
-
 .chat-user {
   background: var(--blue-dim);
   border: 1px solid var(--blue-b);
   border-radius: 16px 16px 4px 16px;
   padding: 12px 16px;
-  margin-left: 8%;
+  margin-left: 8px;
   font-size: 0.92rem;
   line-height: 1.65;
   color: var(--text);
@@ -270,15 +285,13 @@ footer { visibility: hidden; }
   border-left: 3px solid var(--blue);
   border-radius: 4px 16px 16px 16px;
   padding: 14px 16px;
-  margin-right: 8%;
+  margin-right: 8px;
   font-size: 0.92rem;
   line-height: 1.75;
   color: var(--text);
 }
 
-/* ------------------------------------------------------------------
-   Inputs and buttons (shared)
--------------------------------------------------------------------*/
+/* Inputs and select boxes */
 .stTextInput > div > div > input,
 .stTextArea > div > div > textarea,
 .stNumberInput > div > div > input,
@@ -298,11 +311,28 @@ footer { visibility: hidden; }
   box-shadow: 0 0 0 2px var(--blue-dim) !important;
 }
 
-/* DO NOT touch checkbox colors here — login page (auth.py) controls them */
+/* Password eye toggle (make visible everywhere) */
+[data-testid="stPasswordInput-toggleVisibility"] {
+  color: var(--text-2) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+[data-testid="stPasswordInput-toggleVisibility"] svg {
+  fill: var(--text-2) !important;
+}
+[data-testid="stPasswordInput-toggleVisibility"]:hover {
+  background: rgba(0,0,0,0.03) !important;
+}
+[data-testid="stPasswordInput-toggleVisibility"]:focus,
+[data-testid="stPasswordInput-toggleVisibility"]:active {
+  outline: none !important;
+  box-shadow: none !important;
+  background: rgba(0,0,0,0.05) !important;
+}
 
-/* Primary buttons */
-.stButton button,
-.stFormSubmitButton button {
+/* Primary buttons (all pages) */
+.stButton > button,
+.stFormSubmitButton > button {
   background: linear-gradient(135deg, #1a4fa0, #2563c0) !important;
   color: #ffffff !important;
   font-weight: 600 !important;
@@ -311,16 +341,16 @@ footer { visibility: hidden; }
   min-height: 44px !important;
   font-size: 0.88rem !important;
 }
-.stButton button:hover,
-.stFormSubmitButton button:hover {
+.stButton > button:hover,
+.stFormSubmitButton > button:hover {
   background: linear-gradient(135deg, #2563c0, #3478d4) !important;
   box-shadow: 0 4px 16px rgba(26,79,160,0.30) !important;
 }
-/* Prevent black/dark colour on click and focus — this is the fix */
+
+/* Prevent ugly black colour on click/focus */
 .stButton > button:active,
 .stButton > button:focus,
 .stButton > button:focus-visible,
-.stButton > button:focus:not(:focus-visible),
 .stFormSubmitButton > button:active,
 .stFormSubmitButton > button:focus,
 .stFormSubmitButton > button:focus-visible {
@@ -330,7 +360,8 @@ footer { visibility: hidden; }
   border: none !important;
   outline: none !important;
 }
-/* Sidebar buttons on click */
+
+/* Sidebar buttons active state */
 [data-testid="stSidebar"] .stButton > button:active,
 [data-testid="stSidebar"] .stButton > button:focus,
 [data-testid="stSidebar"] .stButton > button:focus-visible {
@@ -339,6 +370,7 @@ footer { visibility: hidden; }
   outline: none !important;
   border-color: rgba(255,255,255,0.25) !important;
 }
+
 /* Download buttons */
 .stDownloadButton > button:active,
 .stDownloadButton > button:focus,
@@ -355,15 +387,12 @@ footer { visibility: hidden; }
   margin: 12px 0;
 }
 
-/* ------------------------------------------------------------------
-   Tabs (Chat / Docs / Dashboard / Users / Account)
--------------------------------------------------------------------*/
+/* Tabs: Chat / Docs / Dashboard / Users / Account */
 .stTabs [data-baseweb="tab-list"] {
   gap: 4px !important;
   border-bottom: 2px solid var(--border) !important;
   background: transparent !important;
 }
-
 .stTabs [data-baseweb="tab"] {
   padding: 10px 18px !important;
   font-size: 0.88rem !important;
@@ -373,16 +402,13 @@ footer { visibility: hidden; }
   background: transparent !important;
   min-height: 44px !important;
 }
-
 .stTabs [aria-selected="true"] {
   color: var(--blue) !important;
   border-bottom: 2px solid var(--blue) !important;
   font-weight: 600 !important;
 }
 
-/* ------------------------------------------------------------------
-   Bottom mobile nav (when visible)
--------------------------------------------------------------------*/
+/* Bottom mobile nav */
 .bottom-nav {
   position: fixed;
   bottom: 0;
@@ -423,9 +449,7 @@ footer { visibility: hidden; }
   .bottom-nav { display: none !important; }
 }
 
-/* ------------------------------------------------------------------
-   Notifications (expander + rows) — readable, no dark hover
--------------------------------------------------------------------*/
+/* Notifications list */
 .notif-item {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
@@ -450,9 +474,7 @@ footer { visibility: hidden; }
   color: var(--text-2);
 }
 
-/* ------------------------------------------------------------------
-   Mic banner text (when mic is on)
--------------------------------------------------------------------*/
+/* Mic banner text when mic is on */
 .mic-banner {
   background: rgba(192,57,43,0.06);
   border: 1px dashed rgba(192,57,43,0.30);
@@ -463,6 +485,7 @@ footer { visibility: hidden; }
   font-size: 0.78rem;
   color: #a93226;
 }
+
 /* Light, subtle placeholder text for all inputs/textareas */
 input::placeholder,
 textarea::placeholder {
@@ -471,9 +494,7 @@ textarea::placeholder {
   opacity: 0.7 !important;
 }
 
-/* ------------------------------------------------------------------
-   Chat bubbles wrapper & label
--------------------------------------------------------------------*/
+/* Chat wrapper + labels */
 .chat-wrap {
   margin-bottom: 18px;
 }
@@ -486,8 +507,6 @@ textarea::placeholder {
   margin-bottom: 4px;
   padding-left: 2px;
 }
-
-/* Status dot (session label) */
 .dot {
   display: inline-block;
   width: 7px;
@@ -497,9 +516,7 @@ textarea::placeholder {
   vertical-align: middle;
 }
 
-/* ------------------------------------------------------------------
-   Confidence bar
--------------------------------------------------------------------*/
+/* Confidence bar */
 .conf-wrap {
   margin-top: 12px;
   padding-top: 8px;
@@ -526,18 +543,16 @@ textarea::placeholder {
   border-radius: 99px;
   transition: width 0.5s ease;
 }
-.conf-high   { background: #00c9a7; }
+.conf-high { background: #00c9a7; }
 .conf-medium { background: #f0a500; }
-.conf-low    { background: #f05252; }
+.conf-low { background: #f05252; }
 .conf-pct {
   font-size: 0.72rem;
   font-weight: 600;
   margin-top: 2px;
 }
 
-/* ------------------------------------------------------------------
-   Source excerpts
--------------------------------------------------------------------*/
+/* Source excerpts */
 .src-wrap {
   margin-top: 10px;
   padding-top: 8px;
@@ -565,9 +580,7 @@ textarea::placeholder {
   line-height: 1.5;
 }
 
-/* ------------------------------------------------------------------
-   Follow-up suggestion chips
--------------------------------------------------------------------*/
+/* Follow-up suggestion chips */
 .followup-wrap {
   margin-top: 8px;
   display: flex;
@@ -603,9 +616,7 @@ textarea::placeholder {
   border-color: var(--blue);
 }
 
-/* ------------------------------------------------------------------
-   Typing indicator dots
--------------------------------------------------------------------*/
+/* Typing indicator dots */
 .typing-dot {
   display: inline-block;
   width: 8px;
@@ -620,12 +631,10 @@ textarea::placeholder {
 .typing-dot:nth-child(3) { animation-delay: 0.4s; }
 @keyframes typing-bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
-  30%           { transform: translateY(-7px); opacity: 1; }
+  30% { transform: translateY(-7px); opacity: 1; }
 }
 
-/* ------------------------------------------------------------------
-   Alert banners (error / warn / info)
--------------------------------------------------------------------*/
+/* Alert banners */
 .alert-error {
   background: rgba(240,82,82,0.09);
   border: 1px solid rgba(240,82,82,0.30);
@@ -657,3 +666,8 @@ textarea::placeholder {
         """,
         unsafe_allow_html=True,
     )
+    # Backwards‑compat aliases for old app.py
+def setup_page() -> None:
+    return setuppage()
+
+SESSION_TIMEOUT_MINUTES = SESSIONTIMEOUTMINUTES
