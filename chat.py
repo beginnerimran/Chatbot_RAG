@@ -593,88 +593,122 @@ def render_chat(pg_url: str, api_key: str, model):
     # ── MIC: st.audio_input (Streamlit 1.33+) + Groq Whisper ────────────────
     # This replaces Web Speech API which was blocked by browsers inside iframes.
     # st.audio_input works on ALL browsers and ALL platforms (HTTP + HTTPS).
-    col_mic, col_input = st.columns([1, 11])
-    with col_mic:
-        if hasattr(st, 'audio_input'):
-            audio_val = st.audio_input(
-                "Record",
-                key=f"mic_audio_{gen}",
-                label_visibility="collapsed",
-                help="Click to record your question — works in all browsers",
-            )
-            if audio_val is not None:
-                if api_key:
-                    with st.spinner("Transcribing..."):
-                        transcript = _transcribe_groq(audio_val.read(), api_key)
-                    if transcript:
-                        st.session_state.pending_query = transcript
-                        st.rerun()
-                    else:
-                        st.toast("Could not transcribe audio. Please type your question.", icon="⚠️")
+        # --- Voice input via Groq Whisper (multi‑language) ---
+    colmic, colinput = st.columns([1, 11])
+
+    with colmic:
+        audioval = st.audio_input(
+            "Record",
+            key=f"mic_audio_{gen}",
+            label_visibility="collapsed",
+            help=(
+                "Click to record your question – works with English, Tamil, Hindi, "
+                "Tanglish, Hinglish etc. (Groq Whisper)."
+            ),
+        )
+
+        if audioval is not None:
+            if apikey:
+                with st.spinner("Transcribing..."):
+                    transcript = transcribe_groq_audio_bytes(audioval.read(), apikey)
+                if transcript:
+                    # feed transcribed text into the normal chat flow
+                    st.session_state["pendingquery"] = transcript
+                    st.rerun()
                 else:
-                    st.toast("Groq API key missing — cannot transcribe.", icon="⚠️")
-        else:
-            # Fallback for Streamlit < 1.33
-            mic_active = st.session_state.get('mic_active', False)
-            mic_label  = "Stop Mic" if mic_active else "Mic"
-            if st.button(mic_label, key=f"mic_toggle_{gen}",
-                         help="Requires Chrome/Edge over HTTPS. Upgrade Streamlit for better mic support.",
-                         use_container_width=True):
-                st.session_state.mic_active       = not mic_active
-                st.session_state.mic_toggle_count = st.session_state.get('mic_toggle_count', 0) + 1
-                st.rerun()
-            if st.session_state.get('mic_active'):
-                st.markdown("""
-                <div class="mic-banner">Mic active &mdash; <span id="chat-voice-text">Initialising...</span></div>
-                """, unsafe_allow_html=True)
+                    st.toast(
+                        "Could not transcribe audio. Please type your question.",
+                        icon="⚠️",
+                    )
+            else:
+                st.toast(
+                    "Groq API key missing – cannot transcribe.",
+                    icon="⚠️",
+                )
 
-    # Re-read pending after possible audio transcription rerun
-    pending = st.session_state.pop('pending_query', pending)
+    # --- Chat input (text box) ---
+    pending = st.session_state.pop("pendingquery", None)
 
-    with col_input:
-        prompt = st.chat_input("Ask about your college documents...") or pending
+    with colinput:
+        prompt = st.chat_input(
+            "Ask about your college documents..." if not pending else None
+        )
+        # if we have a pending transcript and user has not typed anything,
+        # use the transcript as the prompt
+        if pending and not prompt:
+            prompt = pending
 
-    tts_on = st.session_state.get('tts_enabled', True)
+    # --- Read Aloud controls + Export Chat ---
+    ttson = st.session_state.get("ttsenabled", True)
     c1, c2, c3 = st.columns([2, 2, 2])
+
+    # Read‑aloud toggle
     with c1:
-        tts_label = "Read Aloud: ON" if tts_on else "Read Aloud: OFF"
-        if st.button(tts_label, key=f"tts_toggle_{gen}", use_container_width=True):
-            st.session_state.tts_enabled = not tts_on
+        tts_label = "Read Aloud ON" if ttson else "Read Aloud OFF"
+        if st.button(
+            tts_label,
+            key=f"tts_toggle_{gen}",
+            use_container_width=True,
+        ):
+            st.session_state["ttsenabled"] = not ttson
             st.rerun()
+
+    # Stop‑speaking button (shown/hidden by JS)
     with c2:
-        # Stop Speaking button — hidden by default, shown by JS when TTS is active
-        st.markdown("""
-        <button id="tts-stop-btn"
-            style="display:none;width:100%;align-items:center;justify-content:center;
-                   gap:6px;padding:10px 0;border-radius:8px;font-size:0.85rem;font-weight:600;
-                   cursor:pointer;border:none;min-height:44px;
-                   background:linear-gradient(135deg,#c0392b,#a93226);color:#fff;
-                   font-family:Inter,sans-serif;">
-            Stop Speaking
-        </button>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            """
+            <button id="tts-stop-btn"
+                    style="
+                        display:none;
+                        width:100%;
+                        align-items:center;
+                        justify-content:center;
+                        gap:6px;
+                        padding:10px 0;
+                        border-radius:8px;
+                        font-size:0.85rem;
+                        font-weight:600;
+                        cursor:pointer;
+                        border:none;
+                        min-height:44px;
+                        background:linear-gradient(135deg,#c0392b,#a93226);
+                        color:#fff;
+                        font-family:Inter,sans-serif;
+                    ">
+                Stop Speaking
+            </button>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Export whole conversation as PDF
     with c3:
-        if st.session_state.messages:
+        if st.session_state.get("messages"):
             try:
-                mime, ext = _pdf_type()
+                mime, ext = pdftype()
                 st.download_button(
                     label="Export Chat",
-                    data=export_conversation_pdf(st.session_state.messages, user.get('username','user')),
+                    data=exportconversationpdf(
+                        st.session_state["messages"],
+                        user.getusername(),  # keep same user method you already use
+                    ),
                     file_name=f"conversation_{datetime.now().strftime('%Y%m%d_%H%M')}.{ext}",
                     mime=mime,
                     key=f"export_conv_{gen}",
                     use_container_width=True,
                 )
             except Exception:
+                # export is optional; ignore failures
                 pass
 
-    # TTS voice JS — always inject for Read Aloud; old-STT JS only in fallback mode
-    _inject_voice_js(
-        mic_active=st.session_state.get('mic_active', False) if not hasattr(st, 'audio_input') else False,
-        tts_on=tts_on,
-        toggle_id=st.session_state.get('mic_toggle_count', 0)
+    # Inject JS for Read‑Aloud only (mic handled by st.audio_input + Groq Whisper)
+    injectvoicejs(
+        micactive=False,  # disable old Web Speech API mic path
+        ttson=ttson,
+        toggleid=st.session_state.get("mictogglecount", 0),
     )
 
+    # If there is still no prompt (nothing typed and no transcript), do nothing
     if not prompt:
         return
 
