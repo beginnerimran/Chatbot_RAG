@@ -176,24 +176,24 @@ footer { visibility: hidden; }
   border-color: rgba(255,255,255,0.25) !important;
 }
 
-/* Sidebar Delete button — override to visible danger style on dark bg */
+/* Sidebar Delete button — white bg, black text (consistent with global danger-btn) */
 [data-testid="stSidebar"] .danger-btn .stButton > button {
-  background: rgba(255,255,255,0.08) !important;
-  border: 1.5px solid rgba(255,120,100,0.70) !important;
-  color: #ffb3a7 !important;
-  font-weight: 700 !important;
+  background: #ffffff !important;
+  border: 1px solid #d0dbef !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
 }
 [data-testid="stSidebar"] .danger-btn .stButton > button:hover {
-  background: rgba(255,80,60,0.20) !important;
-  border-color: rgba(255,120,100,0.90) !important;
-  color: #ffffff !important;
-  box-shadow: 0 2px 8px rgba(255,80,60,0.25) !important;
+  background: #f0f4fa !important;
+  border-color: #b8c9e0 !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+  color: #000000 !important;
 }
 [data-testid="stSidebar"] .danger-btn .stButton > button:active,
 [data-testid="stSidebar"] .danger-btn .stButton > button:focus,
 [data-testid="stSidebar"] .danger-btn .stButton > button:focus-visible {
-  background: rgba(255,80,60,0.18) !important;
-  color: #ffffff !important;
+  background: #f0f4fa !important;
+  color: #000000 !important;
   outline: none !important;
 }
 
@@ -306,20 +306,37 @@ footer { visibility: hidden; }
   border-color: #ffffff !important;
 }
 
-/* Sidebar expander (Documents accordion) */
+/* Sidebar expander (Documents accordion) — white bg, dark text, no black on click */
 [data-testid="stSidebar"] [data-testid="stExpander"] {
-  background: rgba(255,255,255,0.06) !important;
-  border: 1px solid rgba(255,255,255,0.20) !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(255,255,255,0.30) !important;
   border-radius: 8px !important;
 }
 [data-testid="stSidebar"] [data-testid="stExpander"] summary,
 [data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button {
-  background: transparent !important;
-  color: #ffffff !important;
+  background: #ffffff !important;
+  color: #1a2640 !important;
   font-weight: 700 !important;
 }
+[data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:hover {
+  background: #f0f4fa !important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:active,
+[data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:focus,
+[data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:focus-visible {
+  background: #f0f4fa !important;
+  color: #1a2640 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
 [data-testid="stSidebar"] [data-testid="stExpander"] svg {
-  fill: #ffffff !important;
+  fill: #1a2640 !important;
+}
+/* All text content inside the sidebar expander should be dark */
+[data-testid="stSidebar"] [data-testid="stExpander"] div,
+[data-testid="stSidebar"] [data-testid="stExpander"] span,
+[data-testid="stSidebar"] [data-testid="stExpander"] p {
+  color: #1a2640 !important;
 }
 
 /* Sidebar selectbox — visible on dark blue background */
@@ -520,21 +537,23 @@ footer { visibility: hidden; }
   background: rgba(0,0,0,0.05) !important;
 }
 
-/* Primary buttons (all pages) */
+/* Primary buttons (all pages) — white background, black text */
 .stButton > button,
 .stFormSubmitButton > button {
-  background: linear-gradient(135deg, #1a4fa0, #2563c0) !important;
-  color: #ffffff !important;
+  background: #ffffff !important;
+  color: #000000 !important;
   font-weight: 600 !important;
-  border: none !important;
+  border: 1px solid #d0dbef !important;
   border-radius: var(--radius-sm) !important;
   min-height: 44px !important;
   font-size: 0.88rem !important;
 }
 .stButton > button:hover,
 .stFormSubmitButton > button:hover {
-  background: linear-gradient(135deg, #2563c0, #3478d4) !important;
-  box-shadow: 0 4px 16px rgba(26,79,160,0.30) !important;
+  background: #f0f4fa !important;
+  border-color: #b8c9e0 !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+  color: #000000 !important;
 }
 
 /* Prevent ugly black colour on click/focus */
@@ -544,10 +563,10 @@ footer { visibility: hidden; }
 .stFormSubmitButton > button:active,
 .stFormSubmitButton > button:focus,
 .stFormSubmitButton > button:focus-visible {
-  background: linear-gradient(135deg, #1a4fa0, #2563c0) !important;
-  color: #ffffff !important;
-  box-shadow: 0 2px 10px rgba(26,79,160,0.25) !important;
-  border: none !important;
+  background: #f0f4fa !important;
+  color: #000000 !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.10) !important;
+  border: 1px solid #b8c9e0 !important;
   outline: none !important;
 }
 
@@ -852,25 +871,25 @@ textarea::placeholder {
   font-size: 0.85rem;
   margin: 6px 0;
 }
-/* Danger / Delete buttons — soft red, no black */
+/* Danger / Delete buttons — white background, black text */
 .danger-btn .stButton > button {
-  background: rgba(192,57,43,0.09) !important;
-  border: 1.5px solid rgba(192,57,43,0.35) !important;
-  color: #c0392b !important;
+  background: #ffffff !important;
+  border: 1px solid #d0dbef !important;
+  color: #000000 !important;
   font-weight: 600 !important;
 }
 .danger-btn .stButton > button:hover {
-  background: rgba(192,57,43,0.17) !important;
-  border-color: rgba(192,57,43,0.55) !important;
-  box-shadow: 0 2px 10px rgba(192,57,43,0.15) !important;
-  color: #a93226 !important;
+  background: #f0f4fa !important;
+  border-color: #b8c9e0 !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+  color: #000000 !important;
 }
 .danger-btn .stButton > button:active,
 .danger-btn .stButton > button:focus,
 .danger-btn .stButton > button:focus-visible {
-  background: rgba(192,57,43,0.14) !important;
-  border-color: rgba(192,57,43,0.55) !important;
-  color: #a93226 !important;
+  background: #f0f4fa !important;
+  border-color: #b8c9e0 !important;
+  color: #000000 !important;
   outline: none !important;
   box-shadow: none !important;
 }

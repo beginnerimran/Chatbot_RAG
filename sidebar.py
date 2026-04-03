@@ -8,7 +8,7 @@ from auth import check_permission
 from database import (
     clear_chat_history, delete_document, get_document_list,
     get_db_connection, get_stats, load_chat_history,
-    save_document_to_db, get_categories, update_user_language
+    save_document_to_db, update_user_language
 )
 from rag import OCR_AVAILABLE, extract_text_from_pdf
 
@@ -47,9 +47,8 @@ def render_sidebar(pg_url: str, api_key: str, model):
         # Upload — Admin/Staff only
         if check_permission(role, "upload"):
             st.markdown("**Upload Documents**")
-            categories  = get_categories(pg_url)
-            cat_names   = [c['name'] for c in categories] if categories else ["General"]
-            category    = st.selectbox("Category", cat_names, key="upload_category")
+            cat_names   = ["Admission", "Exam", "General", "Rules", "Timetable"]
+            category    = st.selectbox("Category", cat_names, index=0, key="upload_category")
             uploaded_files = st.file_uploader("PDF files", type=['pdf'],
                                                accept_multiple_files=True,
                                                label_visibility="collapsed")
@@ -92,8 +91,8 @@ def render_sidebar(pg_url: str, api_key: str, model):
                         display_name = (fname[:32] + '…') if len(fname) > 32 else fname
                         st.markdown(
                             f"""<div style="
-                                background: rgba(255,255,255,0.14);
-                                border: 1px solid rgba(255,255,255,0.25);
+                                background: #ffffff;
+                                border: 1px solid #d0dbef;
                                 border-radius: 7px;
                                 padding: 9px 12px;
                                 margin-bottom: 6px;
@@ -105,7 +104,7 @@ def render_sidebar(pg_url: str, api_key: str, model):
                                 <div style="
                                     font-size: 0.82rem;
                                     font-weight: 700;
-                                    color: #ffffff;
+                                    color: #1a2640;
                                     margin-bottom: 4px;
                                     word-break: break-word;
                                     overflow-wrap: anywhere;
@@ -117,7 +116,7 @@ def render_sidebar(pg_url: str, api_key: str, model):
                                 </div>
                                 <div style="
                                     font-size: 0.68rem;
-                                    color: rgba(255,255,255,0.70);
+                                    color: #6b82a0;
                                     font-weight: 500;
                                 ">
                                     {doc['chunk_count']} chunks &middot; {cat}{ocr_b}
