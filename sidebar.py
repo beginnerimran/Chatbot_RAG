@@ -78,29 +78,33 @@ def render_sidebar(pg_url: str, api_key: str, model):
 
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
-        # Document list
-        docs      = get_document_list(pg_url)
-        doc_count = len(docs) if docs else 0
-        with st.expander(f"Documents ({doc_count})", expanded=False):
-            if docs:
-                for doc in docs:
-                    c1, c2 = st.columns([4, 1])
-                    with c1:
-                        cat   = doc.get('category','General')
-                        ocr_b = '<span class="ocr-badge">OCR</span>' if doc['used_ocr'] else ''
-                        st.markdown(
-                            f"<div style='font-size:0.78rem;color:rgba(255,255,255,0.85);'>{doc['filename'][:20]}{'...' if len(doc['filename'])>20 else ''}"
-                            f"<br><span style='font-size:0.65rem;color:rgba(255,255,255,0.55);'>{doc['chunk_count']} chunks · {cat}</span>{ocr_b}</div>",
-                            unsafe_allow_html=True
-                        )
-                    with c2:
-                        if check_permission(role, "delete"):
-                            if st.button("Del", key=f"del_{doc['id']}"):
-                                if delete_document(pg_url, doc['id']):
-                                    st.session_state.docs_loaded = False
-                                    st.rerun()
-            else:
-                st.info("No documents uploaded yet.")
+        # Document list — hidden for students
+        if role != 'student':
+            docs      = get_document_list(pg_url)
+            doc_count = len(docs) if docs else 0
+            with st.expander(f"Documents ({doc_count})", expanded=False):
+                if docs:
+                    for doc in docs:
+                        c1, c2 = st.columns([4, 1])
+                        with c1:
+                            cat   = doc.get('category','General')
+                            ocr_b = '<span class="ocr-badge">OCR</span>' if doc['used_ocr'] else ''
+                            st.markdown(
+                                f"<div style='font-size:0.78rem;color:rgba(255,255,255,0.85);'>{doc['filename'][:20]}{'...' if len(doc['filename'])>20 else ''}"
+                                f"<br><span style='font-size:0.65rem;color:rgba(255,255,255,0.55);'>{doc['chunk_count']} chunks · {cat}</span>{ocr_b}</div>",
+                                unsafe_allow_html=True
+                            )
+                        with c2:
+                            if check_permission(role, "delete"):
+                                st.markdown('<div class="danger-btn">', unsafe_allow_html=True)
+                                clicked = st.button("Del", key=f"del_{doc['id']}")
+                                st.markdown('</div>', unsafe_allow_html=True)
+                                if clicked:
+                                    if delete_document(pg_url, doc['id']):
+                                        st.session_state.docs_loaded = False
+                                        st.rerun()
+                else:
+                    st.info("No documents uploaded yet.")
 
         # Admin stats
         if check_permission(role, "view_stats"):

@@ -661,6 +661,28 @@ textarea::placeholder {
   font-size: 0.85rem;
   margin: 6px 0;
 }
+/* Danger / Delete buttons — soft red, no black */
+.danger-btn .stButton > button {
+  background: rgba(192,57,43,0.09) !important;
+  border: 1.5px solid rgba(192,57,43,0.35) !important;
+  color: #c0392b !important;
+  font-weight: 600 !important;
+}
+.danger-btn .stButton > button:hover {
+  background: rgba(192,57,43,0.17) !important;
+  border-color: rgba(192,57,43,0.55) !important;
+  box-shadow: 0 2px 10px rgba(192,57,43,0.15) !important;
+  color: #a93226 !important;
+}
+.danger-btn .stButton > button:active,
+.danger-btn .stButton > button:focus,
+.danger-btn .stButton > button:focus-visible {
+  background: rgba(192,57,43,0.14) !important;
+  border-color: rgba(192,57,43,0.55) !important;
+  color: #a93226 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
 </style>
         """,
         unsafe_allow_html=True,

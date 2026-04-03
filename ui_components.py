@@ -87,7 +87,10 @@ def render_docs_panel(pg_url: str, role: str):
             )
         with col_del:
             if check_permission(role, "delete"):
-                if st.button("Delete", key=f"docs_del_{doc['id']}", help="Delete document"):
+                st.markdown('<div class="danger-btn">', unsafe_allow_html=True)
+                clicked = st.button("Delete", key=f"docs_del_{doc['id']}", help="Delete document")
+                st.markdown('</div>', unsafe_allow_html=True)
+                if clicked:
                     if delete_document(pg_url, doc["id"]):
                         st.session_state.docs_loaded = False
                         st.rerun()
@@ -300,7 +303,10 @@ def render_user_management(pg_url: str, current_username: str):
                 )
             with c5:
                 if u["username"] != current_username:
-                    if st.button("Delete", key=f"del_user_{u['id']}", help=f"Delete {u['username']}"):
+                    st.markdown('<div class="danger-btn">', unsafe_allow_html=True)
+                    clicked = st.button("Delete", key=f"del_user_{u['id']}", help=f"Delete {u['username']}")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    if clicked:
                         ok, msg = delete_user(pg_url, u["id"], current_username)
                         if ok:
                             st.rerun()
