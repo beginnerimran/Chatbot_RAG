@@ -85,24 +85,54 @@ def render_sidebar(pg_url: str, api_key: str, model):
             with st.expander(f"Documents ({doc_count})", expanded=False):
                 if docs:
                     for doc in docs:
-                        c1, c2 = st.columns([4, 1])
-                        with c1:
-                            cat   = doc.get('category','General')
-                            ocr_b = '<span class="ocr-badge">OCR</span>' if doc['used_ocr'] else ''
-                            st.markdown(
-                                f"<div style='font-size:0.78rem;color:rgba(255,255,255,0.85);'>{doc['filename'][:20]}{'...' if len(doc['filename'])>20 else ''}"
-                                f"<br><span style='font-size:0.65rem;color:rgba(255,255,255,0.55);'>{doc['chunk_count']} chunks · {cat}</span>{ocr_b}</div>",
-                                unsafe_allow_html=True
-                            )
-                        with c2:
-                            if check_permission(role, "delete"):
-                                st.markdown('<div class="danger-btn">', unsafe_allow_html=True)
-                                clicked = st.button("Del", key=f"del_{doc['id']}")
-                                st.markdown('</div>', unsafe_allow_html=True)
-                                if clicked:
-                                    if delete_document(pg_url, doc['id']):
-                                        st.session_state.docs_loaded = False
-                                        st.rerun()
+                        cat   = doc.get('category', 'General')
+                        ocr_b = ' · OCR' if doc['used_ocr'] else ''
+                        fname = doc['filename']
+                        # Truncate long names with ellipsis but keep readable
+                        display_name = (fname[:32] + '…') if len(fname) > 32 else fname
+                        st.markdown(
+                            f"""<div style="
+                                background: rgba(255,255,255,0.14);
+                                border: 1px solid rgba(255,255,255,0.25);
+                                border-radius: 7px;
+                                padding: 9px 12px;
+                                margin-bottom: 6px;
+                                word-break: break-word;
+                                overflow-wrap: break-word;
+                                white-space: normal;
+                                min-width: 0;
+                            ">
+                                <div style="
+                                    font-size: 0.82rem;
+                                    font-weight: 700;
+                                    color: #ffffff;
+                                    margin-bottom: 4px;
+                                    word-break: break-word;
+                                    overflow-wrap: anywhere;
+                                    white-space: normal;
+                                    line-height: 1.4;
+                                    letter-spacing: 0.01em;
+                                ">
+                                    {display_name}
+                                </div>
+                                <div style="
+                                    font-size: 0.68rem;
+                                    color: rgba(255,255,255,0.70);
+                                    font-weight: 500;
+                                ">
+                                    {doc['chunk_count']} chunks &middot; {cat}{ocr_b}
+                                </div>
+                            </div>""",
+                            unsafe_allow_html=True
+                        )
+                        if check_permission(role, "delete"):
+                            st.markdown('<div class="danger-btn">', unsafe_allow_html=True)
+                            clicked = st.button("Delete", key=f"del_{doc['id']}", use_container_width=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            if clicked:
+                                if delete_document(pg_url, doc['id']):
+                                    st.session_state.docs_loaded = False
+                                    st.rerun()
                 else:
                     st.info("No documents uploaded yet.")
 

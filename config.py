@@ -85,14 +85,41 @@ html, body, .stApp {
   color: var(--text) !important;
 }
 
-/* Hide Streamlit menu/footer and all sidebar toggle buttons */
+/* Hide Streamlit menu/footer */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 [data-testid="stToolbar"] { visibility: hidden; }
 
-/* Always hide both sidebar open/close toggle buttons */
+/* Sidebar: always visible and stable on all devices.
+   The collapsedControl button MUST remain visible so users can
+   re-open the sidebar on small screens — do NOT hide it. */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
-[data-testid="collapsedControl"]        { display: none !important; }
+
+/* Sidebar minimum width — prevents collapsing to zero on narrow viewports */
+[data-testid="stSidebar"] {
+  min-width: 260px !important;
+  max-width: 320px !important;
+}
+
+/* Collapsed-control (hamburger) — visible and styled on mobile */
+[data-testid="collapsedControl"] {
+  display: flex !important;
+  visibility: visible !important;
+  background: var(--blue) !important;
+  border-radius: 0 6px 6px 0 !important;
+  padding: 6px !important;
+}
+[data-testid="collapsedControl"] svg { fill: #ffffff !important; }
+
+/* On desktop (≥992px) sidebar is always open — no need for the hamburger */
+@media (min-width: 992px) {
+  [data-testid="collapsedControl"] { display: none !important; }
+  section[data-testid="stSidebar"] {
+    transform: none !important;
+    visibility: visible !important;
+    left: 0 !important;
+  }
+}
 
 /* Layout container */
 .block-container {
@@ -115,20 +142,184 @@ footer { visibility: hidden; }
 [data-testid="stSidebar"] {
   background: var(--blue) !important;
   border-right: 1px solid rgba(255,255,255,0.15) !important;
+  color: #ffffff !important;
 }
 [data-testid="stSidebar"] > div {
   padding: 1.2rem 1rem !important;
 }
-[data-testid="stSidebar"] {
-  color: rgba(255,255,255,0.95) !important;
+
+/* All sidebar markdown / label text — bright white, bold */
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] div,
+[data-testid="stSidebar"] strong {
+  color: #ffffff !important;
 }
+
+/* Sidebar regular buttons */
 [data-testid="stSidebar"] .stButton button {
   background: rgba(255,255,255,0.15) !important;
-  border: 1px solid rgba(255,255,255,0.25) !important;
+  border: 1px solid rgba(255,255,255,0.30) !important;
   color: #ffffff !important;
+  font-weight: 600 !important;
 }
 [data-testid="stSidebar"] .stButton button:hover {
   background: rgba(255,255,255,0.28) !important;
+}
+[data-testid="stSidebar"] .stButton button:active,
+[data-testid="stSidebar"] .stButton button:focus,
+[data-testid="stSidebar"] .stButton button:focus-visible {
+  background: rgba(255,255,255,0.28) !important;
+  color: #ffffff !important;
+  outline: none !important;
+  border-color: rgba(255,255,255,0.25) !important;
+}
+
+/* Sidebar Delete button — override to visible danger style on dark bg */
+[data-testid="stSidebar"] .danger-btn .stButton > button {
+  background: rgba(255,255,255,0.08) !important;
+  border: 1.5px solid rgba(255,120,100,0.70) !important;
+  color: #ffb3a7 !important;
+  font-weight: 700 !important;
+}
+[data-testid="stSidebar"] .danger-btn .stButton > button:hover {
+  background: rgba(255,80,60,0.20) !important;
+  border-color: rgba(255,120,100,0.90) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(255,80,60,0.25) !important;
+}
+[data-testid="stSidebar"] .danger-btn .stButton > button:active,
+[data-testid="stSidebar"] .danger-btn .stButton > button:focus,
+[data-testid="stSidebar"] .danger-btn .stButton > button:focus-visible {
+  background: rgba(255,80,60,0.18) !important;
+  color: #ffffff !important;
+  outline: none !important;
+}
+
+/* ── Sidebar component classes ─────────────────────────── */
+.user-card {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.user-card-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: rgba(255,255,255,0.65) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 2px;
+}
+.user-card-name {
+  font-size: 1.0rem;
+  font-weight: 800;
+  color: #ffffff !important;
+  letter-spacing: 0.01em;
+}
+
+/* Status indicator dots */
+.dot          { display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle; }
+.dot-green    { background:#00c9a7; }
+.dot-red      { background:#f05252; }
+.dot-amber    { background:#f0a500; }
+
+/* Sidebar stats row */
+.stat-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px 0;
+}
+.stat-card {
+  flex: 1;
+  min-width: 52px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.20);
+  border-radius: 7px;
+  padding: 8px 6px;
+  text-align: center;
+}
+.stat-num {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ffffff !important;
+  line-height: 1.2;
+}
+.stat-lbl {
+  font-size: 0.60rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.65) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* OCR badge */
+.ocr-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.60rem;
+  font-weight: 700;
+  background: rgba(240,165,0,0.25);
+  color: #ffd580 !important;
+  border: 1px solid rgba(240,165,0,0.40);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* Divider inside sidebar */
+[data-testid="stSidebar"] .divider,
+[data-testid="stSidebar"] hr {
+  border-color: rgba(255,255,255,0.18) !important;
+  margin: 10px 0 !important;
+}
+
+/* File uploader — browse button and drag-drop area */
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+  background: rgba(255,255,255,0.08) !important;
+  border: 2px dashed rgba(255,255,255,0.40) !important;
+  border-radius: 8px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"]:hover {
+  background: rgba(255,255,255,0.14) !important;
+  border-color: rgba(255,255,255,0.65) !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] small,
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] p {
+  color: rgba(255,255,255,0.75) !important;
+}
+/* Browse files button inside the uploader */
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneButton"],
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneButton"] button {
+  background: rgba(255,255,255,0.20) !important;
+  border: 1.5px solid rgba(255,255,255,0.50) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneButton"]:hover,
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneButton"] button:hover {
+  background: rgba(255,255,255,0.32) !important;
+  border-color: #ffffff !important;
+}
+
+/* Sidebar expander (Documents accordion) */
+[data-testid="stSidebar"] [data-testid="stExpander"] {
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.20) !important;
+  border-radius: 8px !important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+[data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button {
+  background: transparent !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] svg {
+  fill: #ffffff !important;
 }
 
 /* Sidebar selectbox — visible on dark blue background */

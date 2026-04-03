@@ -268,47 +268,70 @@ def _followup_chips(msg_key: str):
 
 
 def _source_pdf_download(source_doc_names: list, pg_url: str, key_suffix: str):
-    """Show source document info and download buttons for the original PDFs."""
-    from database import get_document_bytes
+    """Show source document info and download buttons for the original PDFs.
+
+    For each source document:
+    - If the original PDF bytes are stored → show a working download button.
+    - If not stored (document uploaded before pdf_blob was introduced) → show a
+      clear re-upload notice. This state is avoided for all documents uploaded
+      through the current upload pipeline.
+    """
+    from database import get_document_bytes, has_pdf_blob
     if not source_doc_names:
         return
 
     st.markdown("""
-    <div style="margin-top:10px;padding:10px 14px;
+    <div style="margin-top:12px;padding:10px 14px;
                 background:rgba(26,79,160,0.06);
                 border:1px solid rgba(26,79,160,0.18);
-                border-radius:8px;">
+                border-radius:8px;margin-bottom:4px;">
         <div style="font-size:0.70rem;font-weight:700;color:var(--text-3);
-                    text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
-            📄 Answer sourced from — download original PDF
+                    text-transform:uppercase;letter-spacing:0.5px;">
+            📄 Source document(s) — download original PDF
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     for i, fname in enumerate(source_doc_names):
         try:
-            pdf_data = get_document_bytes(pg_url, fname)
-            short_name = (fname[:30] + "…") if len(fname) > 30 else fname
-            if pdf_data:
-                st.download_button(
-                    label=f"⬇  {short_name}",
-                    data=pdf_data,
-                    file_name=fname,
-                    mime="application/pdf",
-                    key=f"src_dl_{key_suffix}_{i}",
-                    use_container_width=True,
-                    help=f"Download full PDF: {fname}",
-                )
+            short_name = (fname[:40] + "…") if len(fname) > 40 else fname
+            # Check availability before fetching the full blob (avoids loading
+            # large BYTEA just to decide what UI to render)
+            available = has_pdf_blob(pg_url, fname)
+            if available:
+                pdf_data = get_document_bytes(pg_url, fname)
+                if pdf_data:
+                    st.download_button(
+                        label=f"⬇  {short_name}",
+                        data=pdf_data,
+                        file_name=fname,
+                        mime="application/pdf",
+                        key=f"src_dl_{key_suffix}_{i}",
+                        use_container_width=True,
+                        help=f"Download original source PDF: {fname}",
+                    )
+                else:
+                    # has_pdf_blob returned True but bytes are empty — edge case
+                    st.markdown(
+                        f'<div style="font-size:0.78rem;color:var(--text-3);padding:4px 0;">'
+                        f'📄 {short_name} '
+                        f'<span style="font-size:0.72rem;color:#c0392b;">'
+                        f'(file data unreadable — please re-upload)</span></div>',
+                        unsafe_allow_html=True,
+                    )
             else:
+                # Document exists in RAG but was uploaded before PDF storage was
+                # enabled. Re-uploading the same file will fix this.
                 st.markdown(
-                    f'<div style="font-size:0.78rem;color:var(--text-3);padding:4px 0;">'
-                    f'📄 {short_name} <span style="color:var(--text-3);font-size:0.7rem;">'
-                    f'(PDF not stored — re-upload to enable download)</span></div>',
+                    f'<div style="font-size:0.78rem;color:var(--text-3);padding:6px 0;">'
+                    f'📄 <strong style="color:var(--text-2);">{short_name}</strong> '
+                    f'<span style="font-size:0.72rem;color:var(--text-3);">'
+                    f'(original file not stored — ask Admin/Staff to re-upload this PDF '
+                    f'to enable source download)</span></div>',
                     unsafe_allow_html=True,
                 )
-        except Exception:
-            pass
-
+        except Exception as e:
+            print(f"[chat] _source_pdf_download error for '{fname}': {e}")
 
 
 # ─────────────────────────────────────────────

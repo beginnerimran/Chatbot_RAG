@@ -134,7 +134,8 @@ def init_db(pg_url: str) -> bool:
                     chunks_blob BYTEA,
                     embeddings_blob BYTEA,
                     used_ocr BOOLEAN DEFAULT FALSE,
-                    category TEXT DEFAULT 'General'
+                    category TEXT DEFAULT 'General',
+                    pdf_blob BYTEA
                 );
             """)
             cur.execute("""
@@ -438,8 +439,32 @@ def _notify_all_students(pg_url: str, message: str):
         conn.close()
 
 
+def has_pdf_blob(pg_url: str, filename: str) -> bool:
+    """Return True only if this document has a stored original PDF ready for download."""
+    conn = get_db_connection(pg_url)
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pdf_blob IS NOT NULL AND octet_length(pdf_blob) > 0 "
+                "FROM documents WHERE filename=%s",
+                (filename,)
+            )
+            row = cur.fetchone()
+            return bool(row and row[0])
+    except DatabaseError:
+        return False
+    finally:
+        conn.close()
+
+
 def get_document_bytes(pg_url: str, filename: str) -> Optional[bytes]:
-    """Retrieve the raw PDF bytes for a given document filename."""
+    """Retrieve the raw PDF bytes for a given document filename.
+    Returns bytes if available, or None if not stored.
+    The upload pipeline stores pdf_blob for every document uploaded via the sidebar.
+    Documents uploaded before this column existed must be re-uploaded to enable download.
+    """
     conn = get_db_connection(pg_url)
     if not conn:
         return None
@@ -448,9 +473,12 @@ def get_document_bytes(pg_url: str, filename: str) -> Optional[bytes]:
             cur.execute("SELECT pdf_blob FROM documents WHERE filename=%s", (filename,))
             row = cur.fetchone()
             if row and row[0]:
-                return bytes(row[0])
+                raw = row[0]
+                # psycopg2 may return memoryview or bytes — normalise to bytes
+                return bytes(raw) if not isinstance(raw, bytes) else raw
         return None
-    except DatabaseError:
+    except DatabaseError as e:
+        print(f"[DB] get_document_bytes error for '{filename}': {e}")
         return None
     finally:
         conn.close()
