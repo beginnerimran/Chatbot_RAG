@@ -95,10 +95,19 @@ footer { visibility: hidden; }
    re-open the sidebar on small screens — do NOT hide it. */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
 
-/* Sidebar minimum width — prevents collapsing to zero on narrow viewports */
-[data-testid="stSidebar"] {
-  min-width: 260px !important;
-  max-width: 320px !important;
+/* Desktop: sidebar always open and sized */
+@media (min-width: 992px) {
+  [data-testid="stSidebar"] {
+    min-width: 260px !important;
+    max-width: 320px !important;
+  }
+}
+/* Mobile: sidebar starts collapsed, revealed via hamburger drawer */
+@media (max-width: 991px) {
+  [data-testid="stSidebar"] {
+    min-width: 0 !important;
+    max-width: 85vw !important;
+  }
 }
 
 /* Collapsed-control (hamburger) — visible and styled on mobile */
@@ -256,6 +265,44 @@ footer { visibility: hidden; }
   letter-spacing: 0.4px;
 }
 
+/* ── Dashboard (main content) stat cards — override white text ── */
+.block-container .stat-row {
+  gap: 10px;
+}
+.block-container .stat-card {
+  background: #f0f6ff !important;
+  border: 1px solid #d0dbef !important;
+  box-shadow: 0 2px 8px rgba(26,79,160,0.07) !important;
+}
+.block-container .stat-num {
+  color: #1a2640 !important;
+  font-size: 1.4rem !important;
+}
+.block-container .stat-lbl {
+  color: #3d5275 !important;
+}
+
+/* Sidebar stat cards — white bg, dark text (readable on any background) */
+[data-testid="stSidebar"] .stat-card {
+  background: #ffffff !important;
+  border: 1px solid rgba(255,255,255,0.50) !important;
+}
+[data-testid="stSidebar"] .stat-num {
+  color: #1a2640 !important;
+}
+[data-testid="stSidebar"] .stat-lbl {
+  color: #3d5275 !important;
+}
+
+/* Dashboard section title */
+.dash-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #1a2640;
+  margin-bottom: 10px;
+  padding: 2px 0;
+}
+
 /* OCR badge */
 .ocr-badge {
   display: inline-block;
@@ -344,15 +391,22 @@ footer { visibility: hidden; }
   color: rgba(255,255,255,0.85) !important;
 }
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
-  background: rgba(255,255,255,0.12) !important;
-  border: 1px solid rgba(255,255,255,0.35) !important;
+  background: rgba(255,255,255,0.15) !important;
+  border: 1.5px solid rgba(255,255,255,0.45) !important;
   border-radius: 8px !important;
+  min-height: 40px !important;
 }
+/* Wildcard ensures selected value, placeholder, and arrow are all white */
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"],
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] *,
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] span,
-[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] div {
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] div,
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] p {
   color: #ffffff !important;
 }
-[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] svg { fill: #ffffff !important; }
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] svg,
+[data-testid="stSidebar"] .stSelectbox svg { fill: #ffffff !important; }
+/* Dropdown options list */
 [data-baseweb="popover"] [role="listbox"] { background: #1a3a7a !important; }
 [data-baseweb="popover"] [role="option"]  { background: #1a3a7a !important; color: #ffffff !important; }
 [data-baseweb="popover"] [role="option"]:hover,
@@ -386,10 +440,19 @@ footer { visibility: hidden; }
   background: #e2e8f5 !important;
 }
 [data-testid="stExpander"] [data-baseweb="accordion"] button:focus,
-[data-testid="stExpander"] [data-baseweb="accordion"] button:active {
+[data-testid="stExpander"] [data-baseweb="accordion"] button:active,
+[data-testid="stExpander"] [data-baseweb="accordion"] button:focus-visible {
   outline: none !important;
   box-shadow: none !important;
   background: #dde6f7 !important;
+  color: var(--text) !important;
+}
+/* Global: prevent any expander accordion button from going black */
+[data-baseweb="accordion"] button:active,
+[data-baseweb="accordion"] button:focus-visible {
+  background: inherit !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 [data-testid="stMarkdownContainer"] {

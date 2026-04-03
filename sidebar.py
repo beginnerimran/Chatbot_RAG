@@ -48,6 +48,9 @@ def render_sidebar(pg_url: str, api_key: str, model):
         if check_permission(role, "upload"):
             st.markdown("**Upload Documents**")
             cat_names   = ["Admission", "Exam", "General", "Rules", "Timetable"]
+            # Ensure default is always set so dropdown never appears blank
+            if "upload_category" not in st.session_state:
+                st.session_state["upload_category"] = "Admission"
             category    = st.selectbox("Category", cat_names, index=0, key="upload_category")
             uploaded_files = st.file_uploader("PDF files", type=['pdf'],
                                                accept_multiple_files=True,

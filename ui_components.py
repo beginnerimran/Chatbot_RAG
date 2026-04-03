@@ -5,7 +5,6 @@ UPDATES:
   - Email is mandatory in user creation
   - All text/labels visible (blue-white theme, no black)
   - Clean role field with visible styling
-  - Institutional email workflow UI
 """
 
 import streamlit as st
