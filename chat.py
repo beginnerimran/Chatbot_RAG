@@ -7,7 +7,6 @@ import io
 import json
 import re
 import time
-import urllib.parse
 from datetime import datetime
 
 import streamlit as st
@@ -216,35 +215,11 @@ def _pdf_type():
 
 
 # ─────────────────────────────────────────────
-# ACTION ROW
-# FIX: removed components.html entirely — was leaking raw HTML into the page.
-# Telegram share is a plain markdown anchor. Copy removed (was the leak source).
+# ACTION ROW  —  Helpful / Not Helpful / Save as PDF
+# Telegram removed. Copy-to-clipboard removed (was leaking raw HTML).
 # ─────────────────────────────────────────────
 def _action_row(answer: str, msg_key: str, question: str, username: str, pg_url: str):
     mime, ext = _pdf_type()
-    tg_text   = f"College AI Assistant\n\nQ: {question}\n\nA: {answer}\n\nSRM CS Dept"
-    tg_enc    = urllib.parse.quote(tg_text)
-    tg_deep   = f"tg://msg?text={tg_enc}"      # opens Telegram desktop / mobile app
-    tg_web    = f"https://t.me/share/url?url=&text={tg_enc}"  # web fallback
-
-    st.markdown(f"""
-    <div style="margin-top:8px;margin-bottom:4px;">
-        <a href="#"
-           onclick="(function(){{
-               var tried = false;
-               window.location.href = '{tg_deep}';
-               setTimeout(function(){{
-                   if (!tried) {{ tried = true; window.open('{tg_web}', '_blank'); }}
-               }}, 1500);
-           }})(); return false;"
-           style="display:inline-flex;align-items:center;gap:5px;padding:5px 14px;
-                  border-radius:6px;font-size:0.78rem;font-weight:500;
-                  border:1px solid var(--border-2);background:var(--bg-3);
-                  color:var(--text-2);text-decoration:none;cursor:pointer;">
-            Share on Telegram
-        </a>
-    </div>
-    """, unsafe_allow_html=True)
 
     c1, c2, c3, _ = st.columns([1.5, 1.8, 2, 4])
     with c1:
@@ -292,6 +267,49 @@ def _followup_chips(msg_key: str):
     """, unsafe_allow_html=True)
 
 
+def _source_pdf_download(source_doc_names: list, pg_url: str, key_suffix: str):
+    """Show source document info and download buttons for the original PDFs."""
+    from database import get_document_bytes
+    if not source_doc_names:
+        return
+
+    st.markdown("""
+    <div style="margin-top:10px;padding:10px 14px;
+                background:rgba(26,79,160,0.06);
+                border:1px solid rgba(26,79,160,0.18);
+                border-radius:8px;">
+        <div style="font-size:0.70rem;font-weight:700;color:var(--text-3);
+                    text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+            📄 Answer sourced from — download original PDF
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    for i, fname in enumerate(source_doc_names):
+        try:
+            pdf_data = get_document_bytes(pg_url, fname)
+            short_name = (fname[:30] + "…") if len(fname) > 30 else fname
+            if pdf_data:
+                st.download_button(
+                    label=f"⬇  {short_name}",
+                    data=pdf_data,
+                    file_name=fname,
+                    mime="application/pdf",
+                    key=f"src_dl_{key_suffix}_{i}",
+                    use_container_width=True,
+                    help=f"Download full PDF: {fname}",
+                )
+            else:
+                st.markdown(
+                    f'<div style="font-size:0.78rem;color:var(--text-3);padding:4px 0;">'
+                    f'📄 {short_name} <span style="color:var(--text-3);font-size:0.7rem;">'
+                    f'(PDF not stored — re-upload to enable download)</span></div>',
+                    unsafe_allow_html=True,
+                )
+        except Exception:
+            pass
+
+
 
 # ─────────────────────────────────────────────
 # MAIN CHAT
@@ -313,16 +331,18 @@ def render_chat(pg_url: str, api_key: str, model):
     if not st.session_state.get('docs_loaded'):
         try:
             with st.spinner("Loading knowledge base..."):
-                embeddings, chunks, doc_list = load_all_documents_from_db(pg_url)
-                st.session_state.embeddings  = embeddings
-                st.session_state.chunks      = chunks
-                st.session_state.doc_list    = doc_list
-                st.session_state.docs_loaded = True
+                embeddings, chunks, doc_list, chunk_doc_names = load_all_documents_from_db(pg_url)
+                st.session_state.embeddings       = embeddings
+                st.session_state.chunks           = chunks
+                st.session_state.doc_list         = doc_list
+                st.session_state.chunk_doc_names  = chunk_doc_names
+                st.session_state.docs_loaded      = True
         except Exception:
-            st.session_state.embeddings  = None
-            st.session_state.chunks      = []
-            st.session_state.doc_list    = []
-            st.session_state.docs_loaded = True
+            st.session_state.embeddings       = None
+            st.session_state.chunks           = []
+            st.session_state.doc_list         = []
+            st.session_state.chunk_doc_names  = []
+            st.session_state.docs_loaded      = True
 
     if 'messages' not in st.session_state:
         st.session_state.messages       = []
@@ -386,6 +406,10 @@ def render_chat(pg_url: str, api_key: str, model):
             """, unsafe_allow_html=True)
             prev = st.session_state.messages[i-1].get('content','') if i > 0 else ""
             _action_row(msg.get('content',''), f"{i}_{gen}", prev, user.get('username',''), pg_url)
+            # Show source PDF download if tracked
+            src_docs = msg.get('source_docs', [])
+            if src_docs:
+                _source_pdf_download(src_docs, pg_url, f"hist_{i}_{gen}")
             _followup_chips(f"{i}_{gen}")
 
     if not st.session_state.messages:
@@ -510,7 +534,24 @@ def render_chat(pg_url: str, api_key: str, model):
     except Exception:
         pass
 
-    st.session_state.messages.append({"role":"assistant","content":answer,"sources":sources_json,"confidence":confidence,"time":now})
+    # ── Resolve which documents the chunks came from ──
+    source_doc_names = []
+    if relevant_docs:
+        chunk_doc_names_map = st.session_state.get('chunk_doc_names', [])
+        all_chunks_list     = st.session_state.get('chunks', [])
+        for doc_chunk in relevant_docs:
+            for j, c in enumerate(all_chunks_list):
+                if c == doc_chunk and j < len(chunk_doc_names_map):
+                    name = chunk_doc_names_map[j]
+                    if name not in source_doc_names:
+                        source_doc_names.append(name)
+                    break
+
+    st.session_state.messages.append({
+        "role": "assistant", "content": answer,
+        "sources": sources_json, "source_docs": source_doc_names,
+        "confidence": confidence, "time": now
+    })
 
     src_str = ""
     if relevant_docs:
@@ -530,6 +571,8 @@ def render_chat(pg_url: str, api_key: str, model):
 
     idx = len(st.session_state.messages) - 1
     _action_row(answer, f"{idx}_{gen}", prompt, user.get('username',''), pg_url)
+    if source_doc_names:
+        _source_pdf_download(source_doc_names, pg_url, f"{idx}_{gen}")
     _followup_chips(f"{idx}_{gen}")
 
     if remaining <= 5:
@@ -640,15 +683,16 @@ def render_summarize(pg_url: str, api_key: str, model):
         try:
             with st.spinner("Loading knowledge base..."):
                 from database import load_all_documents_from_db
-                embeddings, chunks, doc_list = load_all_documents_from_db(pg_url)
-                st.session_state.embeddings  = embeddings
-                st.session_state.chunks      = chunks
-                st.session_state.doc_list    = doc_list
-                st.session_state.docs_loaded = True
+                embeddings, chunks, doc_list, chunk_doc_names = load_all_documents_from_db(pg_url)
+                st.session_state.embeddings       = embeddings
+                st.session_state.chunks           = chunks
+                st.session_state.doc_list         = doc_list
+                st.session_state.chunk_doc_names  = chunk_doc_names
+                st.session_state.docs_loaded      = True
         except Exception:
-            st.session_state.embeddings  = None
-            st.session_state.chunks      = []
-            st.session_state.docs_loaded = True
+            st.session_state.embeddings       = None
+            st.session_state.chunks           = []
+            st.session_state.docs_loaded      = True
 
     if not api_key:
         st.markdown('<div class="alert-error">Groq API key missing — cannot generate summaries.</div>', unsafe_allow_html=True)

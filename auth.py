@@ -15,7 +15,7 @@ from datetime import datetime
 import streamlit as st
 
 from config import DEMO_CREDENTIALS_NOTE, SESSION_TIMEOUT_MINUTES
-from database import db_authenticate, get_db_connection, mark_onboarded, add_user
+from database import db_authenticate, get_db_connection, mark_onboarded
 
 
 def authenticate(pg_url, username, password):
@@ -347,8 +347,7 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
     </p>
     <p class="srm-info">
         Login with your university username and password.
-        If you do not have an account, use the <strong>Sign Up</strong> tab
-        or contact your department administrator.
+        If you need an account, please contact your department administrator.
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -356,59 +355,54 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
     with col_right:
         st.markdown("""
 <div class="srm-card">
-    <div class="srm-card-header">Student Portal</div>
+    <div class="srm-card-header">Student Portal — Sign In</div>
 </div>
 """, unsafe_allow_html=True)
 
-        # Tabs — Sign In / Sign Up
-        tab_signin, tab_signup = st.tabs(["Sign In", "Sign Up"])
+        # ── SIGN IN only ──
+        if st.session_state.get('captcha_error'):
+            st.markdown(
+                '<div class="srm-error">Incorrect captcha answer. '
+                'A new question has been generated &mdash; please try again.</div>',
+                unsafe_allow_html=True
+            )
 
-        # ── SIGN IN ──
-        with tab_signin:
+        with st.form("login_form", clear_on_submit=False):
+            # NetID
+            st.markdown('<div class="srm-label">Username</div>', unsafe_allow_html=True)
+            username = st.text_input(
+                "netid", placeholder="srm-netid",
+                label_visibility="collapsed"
+            )
 
-            if st.session_state.get('captcha_error'):
-                st.markdown(
-                    '<div class="srm-error">Incorrect captcha answer. '
-                    'A new question has been generated &mdash; please try again.</div>',
-                    unsafe_allow_html=True
+            # Password
+            st.markdown('<div class="srm-label">Password</div>', unsafe_allow_html=True)
+            password = st.text_input(
+                "password", placeholder="srm-password",
+                type="password", label_visibility="collapsed"
+            )
+            st.markdown(
+                '<div class="srm-forgot"><a href="#">Forgot Password?</a></div>',
+                unsafe_allow_html=True
+            )
+
+            # Captcha
+            st.markdown('<div class="srm-label">Captcha</div>', unsafe_allow_html=True)
+            c_input_col, c_img_col, c_reload_col = st.columns([3, 2.2, 0.6])
+            with c_input_col:
+                captcha_answer = st.number_input(
+                    "captcha", min_value=0, max_value=99, step=1,
+                    key="captcha_input", label_visibility="collapsed",
+                    placeholder="srm-captcha"
                 )
-
-            with st.form("login_form", clear_on_submit=False):
-                # NetID
-                st.markdown('<div class="srm-label">Username</div>', unsafe_allow_html=True)
-                username = st.text_input(
-                    "netid", placeholder="srm-netid",
-                    label_visibility="collapsed"
-                )
-
-                # Password
-                st.markdown('<div class="srm-label">Password</div>', unsafe_allow_html=True)
-                password = st.text_input(
-                    "password", placeholder="srm-password",
-                    type="password", label_visibility="collapsed"
-                )
-                st.markdown(
-                    '<div class="srm-forgot"><a href="#">Forgot Password?</a></div>',
-                    unsafe_allow_html=True
-                )
-
-                # Captcha
-                st.markdown('<div class="srm-label">Captcha</div>', unsafe_allow_html=True)
-                c_input_col, c_img_col, c_reload_col = st.columns([3, 2.2, 0.6])
-                with c_input_col:
-                    captcha_answer = st.number_input(
-                        "captcha", min_value=0, max_value=99, step=1,
-                        key="captcha_input", label_visibility="collapsed",
-                        placeholder="srm-captcha"
-                    )
-                with c_img_col:
-                    st.markdown(f"""
+            with c_img_col:
+                st.markdown(f"""
 <div class="srm-captcha-img">
     <span class="srm-captcha-chars">{a}+{b}=?</span>
 </div>
 """, unsafe_allow_html=True)
-                with c_reload_col:
-                    st.markdown("""
+            with c_reload_col:
+                st.markdown("""
 <div class="srm-captcha-reload" title="New question">
     <svg width="20" height="20" viewBox="0 0 24 24">
         <path fill="#888" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8
@@ -418,68 +412,38 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
 </div>
 """, unsafe_allow_html=True)
 
-                remember  = st.checkbox("Keep me signed in for 7 days")
-                submitted = st.form_submit_button("   Login", use_container_width=True)
+            remember  = st.checkbox("Keep me signed in for 7 days")
+            submitted = st.form_submit_button("   Login", use_container_width=True)
 
-            # ── FIX: captcha submission logic ──
-            if submitted:
-                if not username or not password:
-                    st.error("Please enter both username and password.")
-                elif int(captcha_answer) != st.session_state.captcha_ans:
-                    # Reset the input widget value and generate new question,
-                    # then rerun so the new question shows and input is cleared.
-                    st.session_state.captcha_input = 0
-                    _init_captcha()
-                    st.session_state.captcha_error = True
+        if submitted:
+            if not username or not password:
+                st.error("Please enter both username and password.")
+            elif int(captcha_answer) != st.session_state.captcha_ans:
+                st.session_state.captcha_input = 0
+                _init_captcha()
+                st.session_state.captcha_error = True
+                st.rerun()
+            else:
+                st.session_state.captcha_error = False
+                with st.spinner("Signing in..."):
+                    user = authenticate(pg_url, username, password)
+                if user:
+                    st.session_state.user          = user
+                    st.session_state.authenticated = True
+                    st.session_state.last_activity = time.time()
+                    st.session_state.language      = user.get('language', 'en')
+                    st.query_params["sid"] = _make_token(user["username"], user["role"], user["display"])
+                    if remember:
+                        st.session_state.remembered_user  = username
+                        st.session_state.remember_expires = datetime.now().timestamp() + 7 * 24 * 3600
                     st.rerun()
                 else:
-                    st.session_state.captcha_error = False
-                    with st.spinner("Signing in..."):
-                        user = authenticate(pg_url, username, password)
-                    if user:
-                        st.session_state.user          = user
-                        st.session_state.authenticated = True
-                        st.session_state.last_activity = time.time()
-                        st.session_state.language      = user.get('language', 'en')
-                        st.query_params["sid"] = _make_token(user["username"], user["role"], user["display"])
-                        if remember:
-                            st.session_state.remembered_user  = username
-                            st.session_state.remember_expires = datetime.now().timestamp() + 7 * 24 * 3600
-                        st.rerun()
-                    else:
-                        st.error("Invalid username or password.")
-                        _init_captcha()
+                    st.error("Invalid username or password.")
+                    _init_captcha()
 
-            st.markdown("<hr>", unsafe_allow_html=True)
-            with st.expander("Demo Credentials"):
-                st.markdown(DEMO_CREDENTIALS_NOTE)
-
-        # ── SIGN UP ──
-        with tab_signup:
-            st.info("New accounts are created as **Student** role. Contact an Admin for Staff or Admin access.")
-            with st.form("signup_form", clear_on_submit=True):
-                su_display  = st.text_input("Full Name", placeholder="e.g. Imran Mohamed")
-                su_username = st.text_input("Username", placeholder="Choose a username (no spaces)")
-                su_email    = st.text_input("Email (optional)", placeholder="your@srmist.edu.in")
-                su_password = st.text_input("Password", type="password", placeholder="Min 6 characters")
-                su_confirm  = st.text_input("Confirm Password", type="password")
-                su_submit   = st.form_submit_button("Create Account", use_container_width=True)
-
-            if su_submit:
-                if not su_display or not su_username or not su_password:
-                    st.error("Full name, username and password are required.")
-                elif su_password != su_confirm:
-                    st.error("Passwords do not match.")
-                elif len(su_password) < 6:
-                    st.error("Password must be at least 6 characters.")
-                elif " " in su_username:
-                    st.error("Username cannot contain spaces.")
-                else:
-                    ok, msg = add_user(pg_url, su_username, su_password, "student", su_display, su_email)
-                    if ok:
-                        st.success(f"Account created! Sign in as: **{su_username}**")
-                    else:
-                        st.error(msg)
+        st.markdown("<hr>", unsafe_allow_html=True)
+        with st.expander("Demo Credentials"):
+            st.markdown(DEMO_CREDENTIALS_NOTE)
 
 
 def restore_session(pg_url: str):
@@ -502,7 +466,7 @@ def render_onboarding(pg_url: str):
         ("Welcome!", f"Hi {user['display']}! Welcome to the College AI Assistant. Let's show you around."),
         ("Chat", "Ask any question about college documents. The AI will search through uploaded PDFs and give accurate answers."),
         ("Voice Input", "Click the Mic button to speak your question instead of typing. Works on Chrome and Edge."),
-        ("Export Answers", "Every AI answer can be saved as a PDF or shared on Telegram using the buttons below each response."),
+        ("Export Answers", "Every AI answer can be saved as a PDF using the button below each response."),
         ("Language Support", "The AI auto-detects your language — ask in English, Tamil, Hindi, or even Tanglish."),
         ("You're all set!", "Start by asking a question or clicking one of the suggestion chips below the chat!"),
     ]

@@ -25,6 +25,28 @@ from config import SEED_USERS
 
 
 # ─────────────────────────────────────────────
+# PASSWORD VALIDATION
+# ─────────────────────────────────────────────
+def validate_password(password: str) -> Tuple[bool, str]:
+    """
+    Enforce strong password rules.
+    Returns (True, 'OK') if valid, (False, error_message) if not.
+    """
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+    if not any(c.isupper() for c in password):
+        return False, "Password must contain at least one uppercase letter (A-Z)."
+    if not any(c.islower() for c in password):
+        return False, "Password must contain at least one lowercase letter (a-z)."
+    if not any(c.isdigit() for c in password):
+        return False, "Password must contain at least one number (0-9)."
+    special_chars = "!@#$%^&*()_+-=[]{}|;':\",./<>?"
+    if not any(c in special_chars for c in password):
+        return False, "Password must contain at least one special character (e.g. !@#$%^&*)."
+    return True, "OK"
+
+
+# ─────────────────────────────────────────────
 # CONNECTION
 # FIX: no st.error() here — this is called from sidebar, background, etc.
 # ─────────────────────────────────────────────
@@ -70,6 +92,7 @@ def init_db(pg_url: str) -> bool:
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMP DEFAULT NOW()",
                 "UPDATE users SET onboarded=TRUE WHERE onboarded IS NULL",
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General'",
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS pdf_blob BYTEA",
                 "ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'",
                 "ALTER TABLE query_log ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'",
             ]
@@ -238,10 +261,14 @@ def add_user(pg_url: str, username: str, password: str, role: str,
              display_name: str, email: str = "") -> Tuple[bool, str]:
     if not username or not password or not display_name:
         return False, "All fields are required."
+    if not email or not email.strip():
+        return False, "Email is required."
     if role not in ("admin","staff","student"):
         return False, "Invalid role."
-    if len(password) < 6:
-        return False, "Password must be at least 6 characters."
+    # Strong password validation
+    ok, msg = validate_password(password)
+    if not ok:
+        return False, msg
     conn = get_db_connection(pg_url)
     if not conn:
         return False, "Database connection failed."
@@ -290,8 +317,9 @@ def delete_user(pg_url: str, user_id: int, current_username: str) -> Tuple[bool,
 
 def change_password(pg_url: str, username: str, old_password: str,
                     new_password: str) -> Tuple[bool, str]:
-    if len(new_password) < 6:
-        return False, "New password must be at least 6 characters."
+    ok, msg = validate_password(new_password)
+    if not ok:
+        return False, msg
     conn = get_db_connection(pg_url)
     if not conn:
         return False, "Database connection failed."
@@ -360,7 +388,8 @@ def update_last_active(pg_url: str, username: str):
 # ─────────────────────────────────────────────
 def save_document_to_db(pg_url: str, filename: str, username: str,
                         chunks: List[str], embeddings: np.ndarray,
-                        used_ocr: bool = False, category: str = "General") -> bool:
+                        used_ocr: bool = False, category: str = "General",
+                        pdf_bytes: Optional[bytes] = None) -> bool:
     conn = get_db_connection(pg_url)
     if not conn:
         return False
@@ -370,11 +399,12 @@ def save_document_to_db(pg_url: str, filename: str, username: str,
         with conn.cursor() as cur:
             cur.execute("DELETE FROM documents WHERE filename=%s", (filename,))
             cur.execute("""
-                INSERT INTO documents (filename,uploaded_by,chunk_count,chunks_blob,embeddings_blob,used_ocr,category)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                INSERT INTO documents (filename,uploaded_by,chunk_count,chunks_blob,embeddings_blob,used_ocr,category,pdf_blob)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             """, (filename, username, len(chunks),
                   psycopg2.Binary(chunks_blob), psycopg2.Binary(embeddings_blob),
-                  used_ocr, category))
+                  used_ocr, category,
+                  psycopg2.Binary(pdf_bytes) if pdf_bytes else None))
         conn.commit()
         _notify_all_students(pg_url, f"New document uploaded: {filename} ({category})")
         return True
@@ -408,23 +438,46 @@ def _notify_all_students(pg_url: str, message: str):
         conn.close()
 
 
-def load_all_documents_from_db(pg_url: str):
-    """Returns (embeddings_array, chunks_list, doc_list) or (None, [], []) on failure."""
+def get_document_bytes(pg_url: str, filename: str) -> Optional[bytes]:
+    """Retrieve the raw PDF bytes for a given document filename."""
     conn = get_db_connection(pg_url)
     if not conn:
-        return None, [], []
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pdf_blob FROM documents WHERE filename=%s", (filename,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return bytes(row[0])
+        return None
+    except DatabaseError:
+        return None
+    finally:
+        conn.close()
+
+
+def load_all_documents_from_db(pg_url: str):
+    """Returns (embeddings_array, chunks_list, doc_list, chunk_doc_names) or (None, [], [], []) on failure.
+    chunk_doc_names[i] gives the filename of the document that chunks[i] belongs to.
+    """
+    conn = get_db_connection(pg_url)
+    if not conn:
+        return None, [], [], []
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute("SELECT filename,chunk_count,chunks_blob,embeddings_blob,used_ocr,category FROM documents ORDER BY uploaded_at")
             rows = cur.fetchall()
         if not rows:
-            return None, [], []
-        all_chunks, all_embeddings, doc_list = [], [], []
+            return None, [], [], []
+        all_chunks, all_embeddings, doc_list, chunk_doc_names = [], [], [], []
         for row in rows:
             try:
                 chunks     = pickle.loads(bytes(row['chunks_blob']))
                 embeddings = pickle.loads(bytes(row['embeddings_blob']))
                 all_chunks.extend(chunks)
+                # Track which doc each chunk belongs to
+                for _ in chunks:
+                    chunk_doc_names.append(row['filename'])
                 all_embeddings.append(embeddings)
                 doc_list.append({
                     "filename": row['filename'],
@@ -436,11 +489,11 @@ def load_all_documents_from_db(pg_url: str):
                 print(f"[DB] Skipping corrupt document row: {e}")
                 continue
         if not all_embeddings:
-            return None, [], doc_list
-        return np.vstack(all_embeddings), all_chunks, doc_list
+            return None, [], doc_list, chunk_doc_names
+        return np.vstack(all_embeddings), all_chunks, doc_list, chunk_doc_names
     except Exception as e:
         print(f"[DB] load_all_documents_from_db error: {e}")
-        return None, [], []
+        return None, [], [], []
     finally:
         conn.close()
 

@@ -60,12 +60,13 @@ def render_sidebar(pg_url: str, api_key: str, model):
                     any_saved = False
                     for pdf_file in uploaded_files:
                         with st.spinner(f"Processing {pdf_file.name}..."):
-                            pdf_bytes = pdf_file.read()
+                            pdf_bytes = pdf_file.read()          # capture raw bytes first
                             chunks, used_ocr = extract_text_from_pdf(pdf_bytes, pdf_file.name)
                             if chunks:
                                 embeddings = model.encode(chunks, normalize_embeddings=True, show_progress_bar=False)
                                 if save_document_to_db(pg_url, pdf_file.name, user['username'],
-                                                       chunks, embeddings, used_ocr, category):
+                                                       chunks, embeddings, used_ocr, category,
+                                                       pdf_bytes=pdf_bytes):
                                     ocr_note = " (OCR)" if used_ocr else ""
                                     st.success(f"{pdf_file.name}{ocr_note} — {len(chunks)} chunks saved")
                                     any_saved = True
