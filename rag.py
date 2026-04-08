@@ -1,6 +1,10 @@
 """
-rag.py — RAG pipeline: PDF extraction, semantic search, confidence, LLM via Groq.
-Supports conversation memory and multi-language answers.
+rag.py — RAG pipeline: multi-format text extraction, semantic search, confidence, LLM via Groq.
+CHANGES:
+  - Added extract_text_from_file() supporting PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PNG, JPG, JPEG
+  - Each parser has try/except with user-friendly st messages — never crashes the batch
+  - _chunk_text() helper shared across all formats
+  - PDF extraction and OCR fallback unchanged
 """
 
 import io
@@ -42,6 +46,30 @@ def load_semantic_model():
         return None
 
 
+# ─────────────────────────────────────────────────────────────
+# INTERNAL: chunk a raw text string into overlapping windows
+# ─────────────────────────────────────────────────────────────
+def _chunk_text(raw_text: str, filename: str,
+                chunk_size: int = 100, overlap: int = 20) -> Tuple[List[str], bool]:
+    """Split raw text into overlapping word-window chunks. Returns (chunks, used_ocr=False)."""
+    words = raw_text.split()
+    if len(words) < 10:
+        st.warning(
+            f"'{filename}': No readable text was found in this file. "
+            "Try another file, a clearer scan, or convert it to PDF."
+        )
+        return [], False
+    chunks = []
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i:i + chunk_size])
+        if len(chunk.strip()) > 30:
+            chunks.append(chunk)
+    return chunks, False
+
+
+# ─────────────────────────────────────────────────────────────
+# PDF  (existing logic, unchanged)
+# ─────────────────────────────────────────────────────────────
 def extract_text_from_pdf(pdf_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
     chunk_size, overlap = 100, 20
     if PYPDF2_AVAILABLE:
@@ -60,8 +88,8 @@ def extract_text_from_pdf(pdf_bytes: bytes, filename: str) -> Tuple[List[str], b
                     if len(chunk.strip()) > 30:
                         chunks.append(chunk)
                 return chunks, False
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[rag] PyPDF2 parse error for '{filename}': {e}")
 
     if OCR_AVAILABLE:
         try:
@@ -79,13 +107,287 @@ def extract_text_from_pdf(pdf_bytes: bytes, filename: str) -> Tuple[List[str], b
                         chunks.append(chunk)
                 return chunks, True
         except Exception as e:
-            st.warning(f"OCR failed for '{filename}': {e}")
+            st.warning(f"'{filename}': OCR failed — {e}")
     else:
-        st.warning(f"'{filename}' appears scanned. Install pytesseract + pdf2image for OCR support.")
+        st.warning(
+            f"'{filename}' appears to be a scanned PDF. "
+            "Install pytesseract + pdf2image for OCR support."
+        )
 
     return [], False
 
 
+# ─────────────────────────────────────────────────────────────
+# DOCX
+# ─────────────────────────────────────────────────────────────
+def _extract_docx(file_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
+    try:
+        import docx as _docx  # python-docx
+    except ImportError:
+        st.error(
+            f"'{filename}': python-docx is not installed on the server. "
+            "Run: pip install python-docx"
+        )
+        return [], False
+
+    try:
+        doc      = _docx.Document(io.BytesIO(file_bytes))
+        parts    = []
+        for para in doc.paragraphs:
+            t = para.text.strip()
+            if t:
+                parts.append(t)
+        # Include table content
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = " | ".join(
+                    cell.text.strip() for cell in row.cells if cell.text.strip()
+                )
+                if row_text:
+                    parts.append(row_text)
+        raw_text = "\n".join(parts)
+        return _chunk_text(raw_text, filename)
+    except Exception as e:
+        print(f"[rag] DOCX parse error for '{filename}': {e}")
+        st.error(
+            f"'{filename}': This file appears corrupted or unreadable. "
+            "Please re-save the file and try again."
+        )
+        return [], False
+
+
+# ─────────────────────────────────────────────────────────────
+# DOC  (old binary format — best-effort via antiword, else prompt to convert)
+# ─────────────────────────────────────────────────────────────
+def _extract_doc(file_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
+    # Try antiword (if installed on server)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["antiword", "-"],
+            input=file_bytes, capture_output=True, timeout=15
+        )
+        if result.returncode == 0 and result.stdout:
+            raw_text = result.stdout.decode("utf-8", errors="replace")
+            if raw_text.strip():
+                return _chunk_text(raw_text, filename)
+    except Exception as e:
+        print(f"[rag] antiword attempt failed for '{filename}': {e}")
+
+    # antiword not available or failed — ask user to convert
+    st.warning(
+        f"'{filename}': DOC files could not be read reliably. "
+        "Please convert this file to DOCX or PDF and upload again."
+    )
+    return [], False
+
+
+# ─────────────────────────────────────────────────────────────
+# XLSX / XLS
+# ─────────────────────────────────────────────────────────────
+def _extract_excel(file_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
+    try:
+        import pandas as pd  # noqa
+    except ImportError:
+        st.error(
+            f"'{filename}': pandas / openpyxl are not installed. "
+            "Run: pip install pandas openpyxl"
+        )
+        return [], False
+
+    try:
+        xl     = pd.ExcelFile(io.BytesIO(file_bytes))
+        parts  = []
+        for sheet_name in xl.sheet_names:
+            try:
+                df = xl.parse(sheet_name)
+                if df.empty:
+                    continue
+                parts.append(f"[Sheet: {sheet_name}]")
+                parts.append(df.to_string(index=False))
+            except Exception as sheet_err:
+                print(f"[rag] Skipping sheet '{sheet_name}' in '{filename}': {sheet_err}")
+                continue
+
+        if not parts:
+            st.warning(
+                f"'{filename}': The spreadsheet was read, "
+                "but no usable text/content was found."
+            )
+            return [], False
+
+        raw_text = "\n\n".join(parts)
+        return _chunk_text(raw_text, filename)
+    except Exception as e:
+        print(f"[rag] Excel parse error for '{filename}': {e}")
+        st.error(
+            f"'{filename}': This file appears corrupted or unreadable. "
+            "Please re-save the file and try again."
+        )
+        return [], False
+
+
+# ─────────────────────────────────────────────────────────────
+# CSV
+# ─────────────────────────────────────────────────────────────
+def _extract_csv(file_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
+    try:
+        import pandas as pd  # noqa
+    except ImportError:
+        st.error(
+            f"'{filename}': pandas is not installed. "
+            "Run: pip install pandas"
+        )
+        return [], False
+
+    df = None
+    for encoding in ("utf-8", "latin-1", "cp1252"):
+        try:
+            df = pd.read_csv(io.BytesIO(file_bytes), encoding=encoding)
+            break
+        except Exception:
+            continue
+
+    if df is None:
+        st.error(
+            f"'{filename}': Could not decode CSV. "
+            "Try saving the file as UTF-8 and uploading again."
+        )
+        return [], False
+
+    if df.empty:
+        st.warning(
+            f"'{filename}': The CSV file is empty or has no usable data."
+        )
+        return [], False
+
+    try:
+        raw_text = df.to_string(index=False)
+        return _chunk_text(raw_text, filename)
+    except Exception as e:
+        print(f"[rag] CSV to_string error for '{filename}': {e}")
+        st.error(
+            f"'{filename}': Could not process CSV content. "
+            "Please check the file format and try again."
+        )
+        return [], False
+
+
+# ─────────────────────────────────────────────────────────────
+# TXT
+# ─────────────────────────────────────────────────────────────
+def _extract_txt(file_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
+    raw_text = None
+    for encoding in ("utf-8", "latin-1", "cp1252"):
+        try:
+            raw_text = file_bytes.decode(encoding)
+            break
+        except Exception:
+            continue
+
+    if raw_text is None:
+        st.error(
+            f"'{filename}': Could not decode this text file. "
+            "Please save it as UTF-8 and try again."
+        )
+        return [], False
+
+    if not raw_text.strip():
+        st.warning(f"'{filename}': The text file appears to be empty.")
+        return [], False
+
+    return _chunk_text(raw_text, filename)
+
+
+# ─────────────────────────────────────────────────────────────
+# Images (PNG / JPG / JPEG) — OCR
+# ─────────────────────────────────────────────────────────────
+def _extract_image(file_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
+    if not OCR_AVAILABLE:
+        st.error(
+            f"'{filename}': Image/PDF OCR support is not installed on the server. "
+            "Please upload a text-based PDF or DOCX, "
+            "or install OCR dependencies: pip install pytesseract pillow pdf2image"
+        )
+        return [], False
+
+    try:
+        from PIL import Image
+        img      = Image.open(io.BytesIO(file_bytes))
+        raw_text = pytesseract.image_to_string(img, lang='eng')
+    except Exception as e:
+        print(f"[rag] Image OCR error for '{filename}': {e}")
+        st.error(
+            f"'{filename}': Image OCR failed. "
+            "Please upload a clearer image or a text-based document."
+        )
+        return [], False
+
+    if not raw_text.strip() or len(raw_text.split()) < 10:
+        st.warning(
+            f"'{filename}': OCR found very little text in this image. "
+            "Try uploading a clearer scan, a scanned PDF, or a text-based document."
+        )
+        return [], False
+
+    chunks, _ = _chunk_text(raw_text, filename)
+    return chunks, True   # mark used_ocr=True for images
+
+
+# ─────────────────────────────────────────────────────────────
+# PUBLIC: unified entry point
+# ─────────────────────────────────────────────────────────────
+def extract_text_from_file(file_bytes: bytes, filename: str) -> Tuple[List[str], bool]:
+    """
+    Extract text chunks from any supported file type.
+
+    Supported: PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PNG, JPG, JPEG.
+    Returns (chunks, used_ocr).
+    Shows user-friendly st messages on errors — never raises.
+    """
+    if not filename or "." not in filename:
+        st.error(
+            f"'{filename}': Cannot determine file type (no extension). "
+            "Please rename the file with the correct extension and try again."
+        )
+        return [], False
+
+    ext = filename.rsplit(".", 1)[-1].lower()
+
+    try:
+        if ext == "pdf":
+            return extract_text_from_pdf(file_bytes, filename)
+        elif ext == "docx":
+            return _extract_docx(file_bytes, filename)
+        elif ext == "doc":
+            return _extract_doc(file_bytes, filename)
+        elif ext in ("xlsx", "xls"):
+            return _extract_excel(file_bytes, filename)
+        elif ext == "csv":
+            return _extract_csv(file_bytes, filename)
+        elif ext == "txt":
+            return _extract_txt(file_bytes, filename)
+        elif ext in ("png", "jpg", "jpeg"):
+            return _extract_image(file_bytes, filename)
+        else:
+            st.error(
+                f"'{filename}': This file type (.{ext}) is not supported. "
+                "Please upload PDF, DOCX, XLSX, CSV, TXT, PNG, JPG, or JPEG."
+            )
+            return [], False
+    except Exception as e:
+        # Catch-all — should not normally reach here given per-parser try/except
+        print(f"[rag] Unexpected error in extract_text_from_file for '{filename}': {e}")
+        st.error(
+            f"'{filename}': An unexpected error occurred while reading this file. "
+            "Please re-save the file and try again."
+        )
+        return [], False
+
+
+# ─────────────────────────────────────────────────────────────
+# SEARCH + CONFIDENCE + LLM
+# ─────────────────────────────────────────────────────────────
 def semantic_search(query: str, model, all_embeddings: np.ndarray,
                     chunks: List[str], n_results: int = 5) -> Tuple[List[str], List[float]]:
     query_embedding = model.encode([query], normalize_embeddings=True)

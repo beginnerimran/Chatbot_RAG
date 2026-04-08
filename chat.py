@@ -1,5 +1,11 @@
 """
 chat.py — Full chat UI.
+CHANGES:
+  - Removed "Previous conversations saved — use Load History in sidebar." line from welcome card
+  - _source_pdf_download renamed to _source_file_download, now handles all file types:
+      uses get_document_file_info() to fetch correct mime_type for each source file
+      label updated: "Source document(s) — download original file"
+  - "No documents loaded" hint updated to be file-type agnostic
 """
 
 import html as _html
@@ -15,10 +21,10 @@ from auth import check_permission
 from config import SUGGESTIONS
 from database import (
     load_all_documents_from_db, log_query, save_chat_message,
-    save_feedback, check_rate_limit, update_last_active
+    save_feedback, check_rate_limit, update_last_active,
+    get_document_file_info, has_file_blob,
 )
 from rag import compute_confidence, confidence_html, generate_answer, semantic_search
-
 
 
 def keyword_search(query: str, chunks: list, n_results: int = 5):
@@ -40,17 +46,9 @@ def keyword_search(query: str, chunks: list, n_results: int = 5):
 
 
 def _safe_answer_html(text: str) -> str:
-    """
-    Convert AI answer markdown → safe HTML for embedding in st.markdown HTML blocks.
-
-    Uses a placeholder strategy so code blocks are extracted first,
-    text is HTML-escaped, markdown is converted, then placeholders restored.
-    This prevents backticks / asterisks from breaking Streamlit's parser.
-    """
     t = str(text)
     saved: list[str] = []
 
-    # ── 1. Extract fenced code blocks into placeholders ──────────────────────
     def save_fenced(m):
         code = _html.escape(m.group(2).strip())
         html = (
@@ -63,7 +61,6 @@ def _safe_answer_html(text: str) -> str:
 
     t = re.sub(r'```(\w*)\n?(.*?)```', save_fenced, t, flags=re.DOTALL)
 
-    # ── 2. Extract inline code into placeholders ─────────────────────────────
     def save_inline(m):
         code = _html.escape(m.group(1))
         html = (
@@ -75,11 +72,9 @@ def _safe_answer_html(text: str) -> str:
 
     t = re.sub(r'`([^`\n]+)`', save_inline, t)
 
-    # ── 3. Process line by line: bullets + HTML-escape + inline markdown ─────
     def apply_inline_md(s: str) -> str:
         s = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
         s = re.sub(r'__(.+?)__',     r'<strong>\1</strong>', s)
-        # Italic — only *word* not inside ** (avoid matching lone asterisks)
         s = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'<em>\1</em>', s)
         return s
 
@@ -89,7 +84,6 @@ def _safe_answer_html(text: str) -> str:
 
     for line in lines:
         stripped = line.lstrip()
-        # Detect bullet: lines starting with "* ", "- ", or "• "
         bullet_m = re.match(r'^([*\-•])\s+(.*)$', stripped)
         if bullet_m:
             if not in_list:
@@ -109,13 +103,11 @@ def _safe_answer_html(text: str) -> str:
     if in_list:
         out_lines.append('</ul>')
 
-    # ── 4. Join and convert plain newlines → <br/> (skip around list tags) ───
     result = '\n'.join(out_lines)
-    result = re.sub(r'\n(<[uo]l)',    r'\1',    result)   # no <br/> before <ul>/<ol>
-    result = re.sub(r'(</[uo]l>)\n', r'\1',    result)   # no <br/> after </ul>/<ol>
+    result = re.sub(r'\n(<[uo]l)',    r'\1',    result)
+    result = re.sub(r'(</[uo]l>)\n', r'\1',    result)
     result = result.replace('\n', '<br/>')
 
-    # ── 5. Restore code block placeholders ───────────────────────────────────
     for i, block in enumerate(saved):
         result = result.replace(f'\x00PH{i}\x00', block)
 
@@ -215,8 +207,7 @@ def _pdf_type():
 
 
 # ─────────────────────────────────────────────
-# ACTION ROW  —  Helpful / Not Helpful / Save as PDF
-# Telegram removed. Copy-to-clipboard removed (was leaking raw HTML).
+# ACTION ROW
 # ─────────────────────────────────────────────
 def _action_row(answer: str, msg_key: str, question: str, username: str, pg_url: str):
     mime, ext = _pdf_type()
@@ -258,7 +249,7 @@ def _followup_chips(msg_key: str):
     rows  = ""
     for c in chips:
         safe = c.replace("'", "\\'")
-        rows += f'<span class="followup-chip" onclick="(function(){{var i=document.querySelector(\'textarea[data-testid=stChatInputTextArea]\');if(i){{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,\'value\').set.call(i,\'{safe}\');i.dispatchEvent(new Event(\'input\',{{bubbles:true}}));i.focus();}}}})()">{c}</span>'
+        rows += f'<span class="followup-chip" onclick="(function(){{var i=document.querySelector(\'textarea[data-testid=stChatInputTextArea]\');if(i){{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,\'value\').set.call(i,\'{safe}\');i.dispatchEvent(new Event(\'input\',{{bubbles:true}}));i.focus();}}}})()\">{c}</span>'
     st.markdown(f"""
     <div class="followup-wrap">
         <div class="followup-label">Follow-up suggestions</div>
@@ -267,16 +258,15 @@ def _followup_chips(msg_key: str):
     """, unsafe_allow_html=True)
 
 
-def _source_pdf_download(source_doc_names: list, pg_url: str, key_suffix: str):
-    """Show source document info and download buttons for the original PDFs.
+# ─────────────────────────────────────────────
+# SOURCE FILE DOWNLOAD  (generic — not PDF-only)
+# ─────────────────────────────────────────────
+def _source_file_download(source_doc_names: list, pg_url: str, key_suffix: str):
+    """Show source document info and download buttons for the original uploaded files.
 
-    For each source document:
-    - If the original PDF bytes are stored → show a working download button.
-    - If not stored (document uploaded before pdf_blob was introduced) → show a
-      clear re-upload notice. This state is avoided for all documents uploaded
-      through the current upload pipeline.
+    Uses get_document_file_info() to retrieve the correct MIME type so non-PDF
+    files download with the right extension and content type.
     """
-    from database import get_document_bytes, has_pdf_blob
     if not source_doc_names:
         return
 
@@ -287,7 +277,7 @@ def _source_pdf_download(source_doc_names: list, pg_url: str, key_suffix: str):
                 border-radius:8px;margin-bottom:4px;">
         <div style="font-size:0.70rem;font-weight:700;color:var(--text-3);
                     text-transform:uppercase;letter-spacing:0.5px;">
-            📄 Source document(s) — download original PDF
+            📎 Source document(s) — download original file
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -295,43 +285,54 @@ def _source_pdf_download(source_doc_names: list, pg_url: str, key_suffix: str):
     for i, fname in enumerate(source_doc_names):
         try:
             short_name = (fname[:40] + "…") if len(fname) > 40 else fname
-            # Check availability before fetching the full blob (avoids loading
-            # large BYTEA just to decide what UI to render)
-            available = has_pdf_blob(pg_url, fname)
+
+            # Check blob availability first (avoids loading full BYTEA just to render UI)
+            try:
+                available = has_file_blob(pg_url, fname)
+            except Exception as e:
+                print(f"[chat] has_file_blob error for '{fname}': {e}")
+                available = False
+
             if available:
-                pdf_data = get_document_bytes(pg_url, fname)
-                if pdf_data:
+                try:
+                    file_data, file_type, file_mime = get_document_file_info(pg_url, fname)
+                except Exception as e:
+                    print(f"[chat] get_document_file_info error for '{fname}': {e}")
+                    file_data, file_type, file_mime = None, "pdf", "application/pdf"
+
+                if file_data:
                     st.download_button(
                         label=f"⬇  {short_name}",
-                        data=pdf_data,
+                        data=file_data,
                         file_name=fname,
-                        mime="application/pdf",
+                        mime=file_mime,
                         key=f"src_dl_{key_suffix}_{i}",
                         use_container_width=True,
-                        help=f"Download original source PDF: {fname}",
+                        help=f"Download source file: {fname}",
                     )
                 else:
-                    # has_pdf_blob returned True but bytes are empty — edge case
                     st.markdown(
                         f'<div style="font-size:0.78rem;color:var(--text-3);padding:4px 0;">'
-                        f'📄 {short_name} '
+                        f'📎 {short_name} '
                         f'<span style="font-size:0.72rem;color:#c0392b;">'
                         f'(file data unreadable — please re-upload)</span></div>',
                         unsafe_allow_html=True,
                     )
             else:
-                # Document exists in RAG but was uploaded before PDF storage was
-                # enabled. Re-uploading the same file will fix this.
                 st.markdown(
                     f'<div style="font-size:0.78rem;color:var(--text-3);padding:6px 0;">'
-                    f'📄 <strong style="color:var(--text-2);">{short_name}</strong> '
+                    f'📎 <strong style="color:var(--text-2);">{short_name}</strong> '
                     f'<span style="font-size:0.72rem;color:var(--text-3);">'
-                    f'(original file not stored — ask Admin/Staff to re-upload this PDF '
+                    f'(original file not stored — ask Admin/Staff to re-upload this file '
                     f'to enable source download)</span></div>',
                     unsafe_allow_html=True,
                 )
         except Exception as e:
-            print(f"[chat] _source_pdf_download error for '{fname}': {e}")
+            print(f"[chat] _source_file_download error for '{fname}': {e}")
+
+
+# Keep old name as alias for backward compatibility
+_source_pdf_download = _source_file_download
 
 
 # ─────────────────────────────────────────────
@@ -371,6 +372,7 @@ def render_chat(pg_url: str, api_key: str, model):
         st.session_state.messages       = []
         st.session_state.history_loaded = False
 
+    # Welcome card — no extra hint line
     if not st.session_state.messages:
         st.markdown(f"""
         <div style="text-align:center;padding:48px 20px;">
@@ -380,7 +382,6 @@ def render_chat(pg_url: str, api_key: str, model):
                         box-shadow:0 4px 20px rgba(26,79,160,0.3);">SRM</div>
             <h3 style="color:var(--blue);margin-bottom:6px;font-weight:700;">Welcome, {user.get('display','!')}!</h3>
             <p style="color:var(--text-2);font-size:0.9rem;">Ask anything about your college documents.</p>
-            {'<p style="font-size:0.75rem;color:var(--text-3);margin-top:6px;">Previous conversations saved — use Load History in sidebar.</p>' if not st.session_state.get("history_loaded") else ''}
         </div>
         """, unsafe_allow_html=True)
 
@@ -429,10 +430,9 @@ def render_chat(pg_url: str, api_key: str, model):
             """, unsafe_allow_html=True)
             prev = st.session_state.messages[i-1].get('content','') if i > 0 else ""
             _action_row(msg.get('content',''), f"{i}_{gen}", prev, user.get('username',''), pg_url)
-            # Show source PDF download if tracked
             src_docs = msg.get('source_docs', [])
             if src_docs:
-                _source_pdf_download(src_docs, pg_url, f"hist_{i}_{gen}")
+                _source_file_download(src_docs, pg_url, f"hist_{i}_{gen}")
             _followup_chips(f"{i}_{gen}")
 
     if not st.session_state.messages:
@@ -450,17 +450,14 @@ def render_chat(pg_url: str, api_key: str, model):
     if not api_key:
         st.markdown('<div class="alert-error">Groq API key missing.</div>', unsafe_allow_html=True)
     if st.session_state.get('embeddings') is None:
-        st.markdown('<div class="alert-info">No documents loaded yet. Admin or Staff must upload PDFs first.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="alert-info">No documents loaded yet. Admin or Staff must upload documents first.</div>', unsafe_allow_html=True)
     pending = st.session_state.pop('pending_query', None)
 
-    # --- Chat input ---
     prompt = st.chat_input("Ask about your college documents...")
 
-    # Apply any pending suggestion query
     if pending and not prompt:
         prompt = pending
 
-    # --- Export Chat ---
     if st.session_state.get("messages"):
         try:
             mime, ext = _pdf_type()
@@ -478,7 +475,6 @@ def render_chat(pg_url: str, api_key: str, model):
         except Exception:
             pass
 
-    # If no prompt, do nothing
     if not prompt:
         return
 
@@ -494,7 +490,7 @@ def render_chat(pg_url: str, api_key: str, model):
         st.markdown('<div class="alert-error">Groq API key not set.</div>', unsafe_allow_html=True)
         return
     if st.session_state.get('embeddings') is None:
-        st.markdown('<div class="alert-info">No documents uploaded. Ask Admin to upload PDFs first.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="alert-info">No documents uploaded. Ask Admin to upload documents first.</div>', unsafe_allow_html=True)
         return
 
     now = datetime.now().strftime("%H:%M · %d %b %Y")
@@ -557,7 +553,6 @@ def render_chat(pg_url: str, api_key: str, model):
     except Exception:
         pass
 
-    # ── Resolve which documents the chunks came from ──
     source_doc_names = []
     if relevant_docs:
         chunk_doc_names_map = st.session_state.get('chunk_doc_names', [])
@@ -595,7 +590,7 @@ def render_chat(pg_url: str, api_key: str, model):
     idx = len(st.session_state.messages) - 1
     _action_row(answer, f"{idx}_{gen}", prompt, user.get('username',''), pg_url)
     if source_doc_names:
-        _source_pdf_download(source_doc_names, pg_url, f"{idx}_{gen}")
+        _source_file_download(source_doc_names, pg_url, f"{idx}_{gen}")
     _followup_chips(f"{idx}_{gen}")
 
     if remaining <= 5:

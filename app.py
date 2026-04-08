@@ -1,5 +1,12 @@
 """
 app.py — Main entry point for SRM College AI Assistant.
+CHANGES:
+  - st.tabs replaced with query_params-based navigation
+  - Active page tracked via ?page=chat|docs|dashboard|users|account in URL
+  - Browser Back/Forward now works: each page change pushes a new history entry
+  - Role-based pages preserved: admin(5), staff(3), student(2)
+  - Logout clears query params and returns to login
+  - All other logic (session, timeout, sidebar, notifications) unchanged
 """
 
 import time
@@ -31,13 +38,20 @@ from ui_components import (
 )
 
 
+# ── Page definitions per role ──────────────────────────────────────────────────
+_PAGES = {
+    "admin":   [("chat","Chat"), ("docs","Docs"), ("dashboard","Dashboard"), ("users","Users"), ("account","Account")],
+    "staff":   [("chat","Chat"), ("docs","Docs"), ("account","Account")],
+    "student": [("chat","Chat"), ("account","Account")],
+}
+
+
 # -------------------------------------------------------------------
 # Error helpers
 # -------------------------------------------------------------------
 
 def friendly_error(e: Exception) -> str:
     msg = str(e).lower()
-
     if "connection" in msg or "pg_url" in msg or "database" in msg or "psycopg" in msg:
         return "Unable to connect to the database. Please try again in a moment."
     if "groq" in msg or "api key" in msg or "401" in msg:
@@ -102,7 +116,7 @@ def show_error(message: str) -> None:
 
 def load_secrets():
     try:
-        pg_url = st.secrets["PG_URL"]
+        pg_url  = st.secrets["PG_URL"]
         api_key = st.secrets["GROQ_API_KEY"]
         return pg_url, api_key
     except Exception:
@@ -112,7 +126,6 @@ def load_secrets():
 
 
 def safe_render(fn, *args, **kwargs):
-    """Run a UI function and show a friendly message on error."""
     try:
         fn(*args, **kwargs)
     except Exception as e:  # noqa: BLE001
@@ -122,23 +135,85 @@ def safe_render(fn, *args, **kwargs):
 
 
 # -------------------------------------------------------------------
+# Navigation helpers
+# -------------------------------------------------------------------
+
+def _get_available_pages(role: str):
+    """Return list of (page_id, label) for the given role."""
+    return _PAGES.get(role, _PAGES["student"])
+
+
+def _get_current_page(role: str) -> str:
+    """Read the current page from query params; fall back to the first page for the role."""
+    avail_ids = [p[0] for p in _get_available_pages(role)]
+    page = st.query_params.get("page", avail_ids[0])
+    if page not in avail_ids:
+        page = avail_ids[0]
+    return page
+
+
+def _render_nav(role: str) -> str:
+    """
+    Render the navigation bar as Streamlit buttons.
+    Returns the currently active page_id.
+
+    Each button click sets st.query_params["page"] which changes the URL and
+    creates a browser history entry, enabling Back/Forward navigation.
+    """
+    avail  = _get_available_pages(role)
+    active = _get_current_page(role)
+
+    # Nav CSS: style active button differently
+    st.markdown("""
+<style>
+/* Nav bar wrapper */
+div[data-testid="stHorizontalBlock"] .nav-active > button {
+    background: var(--blue) !important;
+    color: #ffffff !important;
+    border-bottom: 3px solid #0d3685 !important;
+    font-weight: 700 !important;
+}
+div[data-testid="stHorizontalBlock"] .nav-inactive > button {
+    background: var(--bg-2) !important;
+    color: var(--text-2) !important;
+    border-bottom: 3px solid transparent !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    nav_cols = st.columns(len(avail))
+    for i, (page_id, page_label) in enumerate(avail):
+        is_active = page_id == active
+        css_class = "nav-active" if is_active else "nav-inactive"
+        with nav_cols[i]:
+            st.markdown(f'<div class="{css_class}">', unsafe_allow_html=True)
+            clicked = st.button(
+                page_label,
+                key=f"nav_{page_id}",
+                use_container_width=True,
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+            if clicked and not is_active:
+                st.query_params["page"] = page_id
+                st.rerun()
+
+    return active
+
+
+# -------------------------------------------------------------------
 # Main app
 # -------------------------------------------------------------------
 
 def main() -> None:
-    # Page + theme
     try:
         setup_page()
     except Exception:
-        # Even if setup_page CSS fails, continue rendering minimal UI
         pass
 
-    # Secrets
     pg_url, api_key = load_secrets()
     if not pg_url:
         return
 
-    # Initialise DB once per session
     try:
         if not st.session_state.get("db_initialised"):
             if init_db(pg_url):
@@ -152,14 +227,11 @@ def main() -> None:
         st.stop()
         return
 
-    # Restore existing session from token (if any)
     try:
         restore_session(pg_url)
     except Exception:
-        # Non-fatal; user can still log in manually
         pass
 
-    # If not authenticated, show login and exit
     if not st.session_state.get("authenticated"):
         try:
             render_login(pg_url)
@@ -167,7 +239,6 @@ def main() -> None:
             show_error(friendly_error(e))
         return
 
-    # Session timeout handling
     try:
         if check_session_timeout():
             st.info("Your session has expired. Please sign in again.")
@@ -177,10 +248,8 @@ def main() -> None:
             st.rerun()
             return
     except Exception:
-        # If timeout check fails, do nothing special
         pass
 
-    # Load semantic model (may be None -> keyword fallback)
     try:
         model = load_semantic_model()
     except Exception:
@@ -189,7 +258,6 @@ def main() -> None:
     user = st.session_state.get("user") or {}
     role = user.get("role", "student")
 
-    # Onboarding tour for first-time users
     if not user.get("onboarded", True):
         try:
             render_onboarding(pg_url)
@@ -197,23 +265,18 @@ def main() -> None:
             show_error(friendly_error(e))
         return
 
-    # Sidebar (user info, uploads, stats, etc.)
     try:
         render_sidebar(pg_url, api_key, model)
     except Exception:
-        # Sidebar is non‑fatal; keep main UI usable
         pass
 
-    # Unread notifications count
     unread = 0
     try:
         unread = get_unread_count(pg_url, user.get("username", ""))
     except Exception:
         unread = 0
 
-    # ------------------------------------------------------------------
-    # Header: title + role + notifications
-    # ------------------------------------------------------------------
+    # ── App header ──────────────────────────────────────────────────────────
     st.markdown(
         f"""
 <div class="app-header">
@@ -232,22 +295,18 @@ def main() -> None:
     )
 
     hc1, hc2 = st.columns([1.5, 10.5])
-
-    # Notifications button (left column)
     with hc1:
         notif_label = f"Notifications ({unread})" if unread > 0 else "Notifications"
         if st.button(notif_label, key="notif_btn", use_container_width=True):
             st.session_state["show_notifications"] = not st.session_state.get(
                 "show_notifications", False
             )
-            # Mark as read when opening
             if st.session_state["show_notifications"]:
                 try:
                     mark_notifications_read(pg_url, user.get("username", ""))
                 except Exception:
                     pass
 
-    # Notifications list (below header)
     if st.session_state.get("show_notifications"):
         try:
             notifs = get_notifications(pg_url, user.get("username", ""))
@@ -255,7 +314,7 @@ def main() -> None:
                 if notifs:
                     for n in notifs:
                         msg = n.get("message", "")
-                        ts = str(n.get("created_at", ""))[:16]
+                        ts  = str(n.get("created_at", ""))[:16]
                         st.markdown(
                             f"""
 <div class="notif-item">
@@ -273,40 +332,31 @@ def main() -> None:
         except Exception:
             pass
 
-    # ------------------------------------------------------------------
-    # Tabs: Chat / Docs / Dashboard / Users / Account
-    # ------------------------------------------------------------------
-    if role == "admin":
-        chat_tab, docs_tab, dash_tab, users_tab, account_tab = st.tabs(
-            ["Chat", "Docs", "Dashboard", "Users", "Account"]
-        )
-    elif role == "staff":
-        chat_tab, docs_tab, account_tab = st.tabs(["Chat", "Docs", "Account"])
-        dash_tab = users_tab = None
-    else:
-        # Students: no Docs tab
-        chat_tab, account_tab = st.tabs(["Chat", "Account"])
-        docs_tab = dash_tab = users_tab = None
+    # ── Navigation bar (replaces st.tabs — supports browser Back/Forward) ──
+    st.markdown("<div style='margin-top:8px;margin-bottom:4px;'>", unsafe_allow_html=True)
+    current_page = _render_nav(role)
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin:0 0 12px 0;border-color:var(--border);'>", unsafe_allow_html=True)
 
-    # Chat tab (everyone)
-    with chat_tab:
+    # ── Page rendering ───────────────────────────────────────────────────────
+    if current_page == "chat":
         safe_render(render_chat, pg_url, api_key, model)
 
-    # Docs tab (admin + staff only — students cannot see this)
-    if role in ("admin", "staff") and docs_tab is not None:
-        with docs_tab:
-            safe_render(render_docs_panel, pg_url, role)
+    elif current_page == "docs" and role in ("admin", "staff"):
+        safe_render(render_docs_panel, pg_url, role)
 
-    # Dashboard + Users (admin only)
-    if role == "admin":
-        with dash_tab:
-            safe_render(render_dashboard, pg_url)
-        with users_tab:
-            safe_render(render_user_management, pg_url, user.get("username", ""))
+    elif current_page == "dashboard" and role == "admin":
+        safe_render(render_dashboard, pg_url)
 
-    # Account tab (change password, etc.)
-    with account_tab:
+    elif current_page == "users" and role == "admin":
+        safe_render(render_user_management, pg_url, user.get("username", ""))
+
+    elif current_page == "account":
         safe_render(render_change_password, pg_url, user.get("username", ""))
+
+    else:
+        # Fallback — should not normally reach here
+        safe_render(render_chat, pg_url, api_key, model)
 
 
 # -------------------------------------------------------------------

@@ -1,13 +1,11 @@
 """
 database.py — All PostgreSQL database operations.
-FIXES:
-  - get_db_connection() called st.error() which crashed when invoked from sidebar/background
-    threads — replaced with silent return None + print to terminal
-  - load_all_documents_from_db st.error() inside except removed — was crashing safe_render
-  - save_document_to_db st.error() removed for same reason
-  - delete_document st.error() removed
-  - get_stats: AVG(confidence) returns None when table empty — guarded with COALESCE
-  - db_authenticate: username lookup was case-sensitive — normalised to lower() on both sides
+CHANGES:
+  - documents table: added file_type TEXT and mime_type TEXT columns
+  - save_document_to_db: accepts file_bytes, file_type, mime_type (pdf_bytes kept for compat)
+  - get_document_file_info(pg_url, filename) → (bytes, file_type, mime_type)
+  - has_file_blob() added (generic); has_pdf_blob() kept as backward-compat alias
+  - All migrations run safely on existing databases
 """
 
 import hashlib
@@ -28,10 +26,6 @@ from config import SEED_USERS
 # PASSWORD VALIDATION
 # ─────────────────────────────────────────────
 def validate_password(password: str) -> Tuple[bool, str]:
-    """
-    Enforce strong password rules.
-    Returns (True, 'OK') if valid, (False, error_message) if not.
-    """
     if len(password) < 8:
         return False, "Password must be at least 8 characters long."
     if not any(c.isupper() for c in password):
@@ -48,7 +42,6 @@ def validate_password(password: str) -> Tuple[bool, str]:
 
 # ─────────────────────────────────────────────
 # CONNECTION
-# FIX: no st.error() here — this is called from sidebar, background, etc.
 # ─────────────────────────────────────────────
 def get_db_connection(pg_url: str):
     try:
@@ -60,6 +53,33 @@ def get_db_connection(pg_url: str):
     except Exception as e:
         print(f"[DB] Unexpected connection error: {e}")
         return None
+
+
+# ─────────────────────────────────────────────
+# MIME TYPE HELPER
+# ─────────────────────────────────────────────
+_MIME_MAP = {
+    "pdf":  "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "doc":  "application/msword",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "xls":  "application/vnd.ms-excel",
+    "csv":  "text/csv",
+    "txt":  "text/plain",
+    "png":  "image/png",
+    "jpg":  "image/jpeg",
+    "jpeg": "image/jpeg",
+}
+
+def mime_for_ext(ext: str) -> str:
+    """Return MIME type string for a file extension (without dot), e.g. 'pdf' → 'application/pdf'."""
+    return _MIME_MAP.get(ext.lower().lstrip("."), "application/octet-stream")
+
+def ext_from_filename(filename: str) -> str:
+    """Return lowercase extension without dot, e.g. 'report.PDF' → 'pdf'."""
+    if "." in filename:
+        return filename.rsplit(".", 1)[-1].lower()
+    return ""
 
 
 # ─────────────────────────────────────────────
@@ -93,6 +113,9 @@ def init_db(pg_url: str) -> bool:
                 "UPDATE users SET onboarded=TRUE WHERE onboarded IS NULL",
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General'",
                 "ALTER TABLE documents ADD COLUMN IF NOT EXISTS pdf_blob BYTEA",
+                # New columns for generic file storage
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_type TEXT DEFAULT 'pdf'",
+                "ALTER TABLE documents ADD COLUMN IF NOT EXISTS mime_type TEXT DEFAULT 'application/pdf'",
                 "ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'",
                 "ALTER TABLE query_log ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'",
             ]
@@ -135,7 +158,9 @@ def init_db(pg_url: str) -> bool:
                     embeddings_blob BYTEA,
                     used_ocr BOOLEAN DEFAULT FALSE,
                     category TEXT DEFAULT 'General',
-                    pdf_blob BYTEA
+                    pdf_blob BYTEA,
+                    file_type TEXT DEFAULT 'pdf',
+                    mime_type TEXT DEFAULT 'application/pdf'
                 );
             """)
             cur.execute("""
@@ -266,7 +291,6 @@ def add_user(pg_url: str, username: str, password: str, role: str,
         return False, "Email is required."
     if role not in ("admin","staff","student"):
         return False, "Invalid role."
-    # Strong password validation
     ok, msg = validate_password(password)
     if not ok:
         return False, msg
@@ -385,32 +409,48 @@ def update_last_active(pg_url: str, username: str):
 
 # ─────────────────────────────────────────────
 # DOCUMENTS
-# FIX: removed st.error() calls — these crash when called inside safe_render
 # ─────────────────────────────────────────────
 def save_document_to_db(pg_url: str, filename: str, username: str,
                         chunks: List[str], embeddings: np.ndarray,
                         used_ocr: bool = False, category: str = "General",
-                        pdf_bytes: Optional[bytes] = None) -> bool:
+                        pdf_bytes: Optional[bytes] = None,       # kept for backward compat
+                        file_bytes: Optional[bytes] = None,      # preferred going forward
+                        file_type: str = "pdf",
+                        mime_type: str = "application/pdf") -> bool:
+    """
+    Save a document to the database.
+
+    Pass file_bytes + file_type + mime_type for non-PDF uploads.
+    pdf_bytes is accepted for backward compatibility and treated as file_bytes when file_bytes is None.
+    """
     conn = get_db_connection(pg_url)
     if not conn:
         return False
     try:
+        # Prefer file_bytes; fall back to pdf_bytes for old callers
+        actual_bytes = file_bytes if file_bytes is not None else pdf_bytes
+
         chunks_blob     = pickle.dumps(chunks)
         embeddings_blob = pickle.dumps(embeddings)
         with conn.cursor() as cur:
             cur.execute("DELETE FROM documents WHERE filename=%s", (filename,))
             cur.execute("""
-                INSERT INTO documents (filename,uploaded_by,chunk_count,chunks_blob,embeddings_blob,used_ocr,category,pdf_blob)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (filename, username, len(chunks),
-                  psycopg2.Binary(chunks_blob), psycopg2.Binary(embeddings_blob),
-                  used_ocr, category,
-                  psycopg2.Binary(pdf_bytes) if pdf_bytes else None))
+                INSERT INTO documents
+                    (filename, uploaded_by, chunk_count, chunks_blob, embeddings_blob,
+                     used_ocr, category, pdf_blob, file_type, mime_type)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                filename, username, len(chunks),
+                psycopg2.Binary(chunks_blob), psycopg2.Binary(embeddings_blob),
+                used_ocr, category,
+                psycopg2.Binary(actual_bytes) if actual_bytes else None,
+                file_type, mime_type,
+            ))
         conn.commit()
         _notify_all_students(pg_url, f"New document uploaded: {filename} ({category})")
         return True
     except DatabaseError as e:
-        print(f"[DB] Failed to save document: {e}")
+        print(f"[DB] Failed to save document '{filename}': {e}")
         try:
             conn.rollback()
         except Exception:
@@ -439,8 +479,8 @@ def _notify_all_students(pg_url: str, message: str):
         conn.close()
 
 
-def has_pdf_blob(pg_url: str, filename: str) -> bool:
-    """Return True only if this document has a stored original PDF ready for download."""
+def has_file_blob(pg_url: str, filename: str) -> bool:
+    """Return True if this document has stored original file bytes ready for download."""
     conn = get_db_connection(pg_url)
     if not conn:
         return False
@@ -459,12 +499,12 @@ def has_pdf_blob(pg_url: str, filename: str) -> bool:
         conn.close()
 
 
+# Backward-compat alias
+has_pdf_blob = has_file_blob
+
+
 def get_document_bytes(pg_url: str, filename: str) -> Optional[bytes]:
-    """Retrieve the raw PDF bytes for a given document filename.
-    Returns bytes if available, or None if not stored.
-    The upload pipeline stores pdf_blob for every document uploaded via the sidebar.
-    Documents uploaded before this column existed must be re-uploaded to enable download.
-    """
+    """Retrieve the raw file bytes for a given document filename."""
     conn = get_db_connection(pg_url)
     if not conn:
         return None
@@ -474,7 +514,6 @@ def get_document_bytes(pg_url: str, filename: str) -> Optional[bytes]:
             row = cur.fetchone()
             if row and row[0]:
                 raw = row[0]
-                # psycopg2 may return memoryview or bytes — normalise to bytes
                 return bytes(raw) if not isinstance(raw, bytes) else raw
         return None
     except DatabaseError as e:
@@ -484,10 +523,36 @@ def get_document_bytes(pg_url: str, filename: str) -> Optional[bytes]:
         conn.close()
 
 
-def load_all_documents_from_db(pg_url: str):
-    """Returns (embeddings_array, chunks_list, doc_list, chunk_doc_names) or (None, [], [], []) on failure.
-    chunk_doc_names[i] gives the filename of the document that chunks[i] belongs to.
+def get_document_file_info(pg_url: str, filename: str) -> Tuple[Optional[bytes], str, str]:
     """
+    Retrieve the raw file bytes plus file_type and mime_type for a document.
+
+    Returns (bytes, file_type, mime_type).
+    Returns (None, 'pdf', 'application/pdf') if not found or on error.
+    """
+    conn = get_db_connection(pg_url)
+    if not conn:
+        return None, "pdf", "application/pdf"
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pdf_blob, file_type, mime_type FROM documents WHERE filename=%s",
+                (filename,)
+            )
+            row = cur.fetchone()
+            if row:
+                raw, ftype, fmime = row
+                data = (bytes(raw) if raw and not isinstance(raw, bytes) else raw) if raw else None
+                return data, (ftype or "pdf"), (fmime or "application/pdf")
+        return None, "pdf", "application/pdf"
+    except DatabaseError as e:
+        print(f"[DB] get_document_file_info error for '{filename}': {e}")
+        return None, "pdf", "application/pdf"
+    finally:
+        conn.close()
+
+
+def load_all_documents_from_db(pg_url: str):
     conn = get_db_connection(pg_url)
     if not conn:
         return None, [], [], []
@@ -503,7 +568,6 @@ def load_all_documents_from_db(pg_url: str):
                 chunks     = pickle.loads(bytes(row['chunks_blob']))
                 embeddings = pickle.loads(bytes(row['embeddings_blob']))
                 all_chunks.extend(chunks)
-                # Track which doc each chunk belongs to
                 for _ in chunks:
                     chunk_doc_names.append(row['filename'])
                 all_embeddings.append(embeddings)
@@ -658,7 +722,6 @@ def get_stats(pg_url: str) -> dict:
             cur.execute("SELECT COUNT(*) FROM documents");            docs      = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM query_log");            queries   = cur.fetchone()[0]
             cur.execute("SELECT COALESCE(SUM(chunk_count),0) FROM documents"); chunks = cur.fetchone()[0]
-            # FIX: COALESCE so AVG never returns None on empty table
             cur.execute("SELECT COALESCE(AVG(confidence),0) FROM query_log WHERE confidence IS NOT NULL"); avg_c = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM users");                users     = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM feedback");             feedback  = cur.fetchone()[0]

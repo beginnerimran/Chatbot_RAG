@@ -1,10 +1,11 @@
 """
 auth.py — Auth, RBAC, session tokens, session timeout, login UI.
-Login page designed to match SRM Student Portal pixel-for-pixel.
-FIXES:
-  - CSS f-string curly brace escaping fixed (lines with @media)
-  - Captcha bug fixed: wrong answer no longer breaks next attempt
-  - Logo replaced with college image
+CHANGES:
+  - College logo URL set to fsh.srmrmp.edu.in logo
+  - Logo is small (44px), neat, inline with title
+  - Header shows only "SRM Institute of Science and Technology" — no subtitle, no tagline
+  - Left-column promotional/welcome text removed; login form is centered & compact
+  - All other auth logic unchanged
 """
 
 import base64
@@ -108,12 +109,8 @@ _ICON_LOCK_BTN = (
     "2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z'/%3E%3C/svg%3E"
 )
 
-# ── REPLACE THIS with your direct image URL ──
-# How to get it:
-#   1. Open your Google Photos link in a browser
-#   2. Right-click the image → "Copy image address"
-#   3. Paste that URL below (must end in .jpg or .png)
-COLLEGE_LOGO_URL = "YOUR_LOGO_URL_HERE"
+# ── College logo — small and neat ──
+COLLEGE_LOGO_URL = "https://fsh.srmrmp.edu.in/wp-content/uploads/2025/07/fsh-logo.png"
 
 
 def render_login(pg_url: str):
@@ -123,7 +120,7 @@ def render_login(pg_url: str):
     a = st.session_state.get('captcha_a', '?')
     b = st.session_state.get('captcha_b', '?')
 
-    # ── Login-page overrides ──
+    # ── Login-page CSS overrides ──
     st.markdown(f"""
 <style>
 /* ── LOGIN PAGE OVERRIDES ── */
@@ -132,44 +129,42 @@ def render_login(pg_url: str):
 .stApp, html, body, [class*="css"] {{ background: #e9edf4 !important; }}
 .block-container {{ padding: 0 !important; max-width: 100% !important; }}
 
-/* SRM header bar */
+/* ── Header bar ── */
 .srm-header {{
     background: #ffffff;
     border-bottom: 1px solid #d8dde8;
-    padding: 18px 48px;
+    padding: 14px 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 18px;
+    gap: 12px;
 }}
+/* Small logo — 44px */
 .srm-logo-img {{
-    width: 74px;
-    height: 74px;
-    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
     object-fit: cover;
-    border: 3px solid #c8a84b;
     flex-shrink: 0;
     background: #1a3a7a;
 }}
-.srm-brand-block {{ text-align: left; }}
-.srm-brand-name  {{ font-size: 3rem; font-weight: 900; color: #1a3a7a; line-height: 1; letter-spacing: 1px; font-family: 'Inter', sans-serif; }}
-.srm-brand-sub   {{ font-size: 0.78rem; font-weight: 600; color: #1a3a7a; letter-spacing: 0.5px; }}
-.srm-brand-tag   {{ font-size: 0.66rem; color: #888; font-style: italic; margin-top: 1px; }}
+/* Institution name only — no subtitle */
+.srm-inst-name {{
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #1a3a7a;
+    letter-spacing: 0.2px;
+    font-family: 'Inter', sans-serif;
+    line-height: 1.2;
+}}
 
-/* Page background fix */
+/* Page content padding */
 .block-container {{ padding: 8px 1rem 6rem 1rem !important; max-width: 100% !important; }}
 @media (min-width: 768px)  {{ .block-container {{ padding: 8px 2rem 3rem 2rem !important; }} }}
 @media (min-width: 1024px) {{ .block-container {{ padding: 8px 3rem 3rem 3rem !important; }} }}
 
-/* Welcome panel (left) */
-.srm-welcome {{ padding: 8px 32px 8px 8px; }}
-.srm-dear    {{ font-size: 1.1rem; font-weight: 700; color: #222; margin-bottom: 10px; }}
-.srm-greet   {{ font-size: 0.9rem; color: #333; margin-bottom: 12px; }}
-.srm-info    {{ font-size: 0.85rem; color: #555; line-height: 1.75; margin-bottom: 10px; }}
-.srm-link    {{ color: #3a7dbf; text-decoration: none; }}
-
-/* Login card (right) */
-.srm-card        {{ background: #fff; border-radius: 4px; box-shadow: 0 2px 18px rgba(0,0,0,0.13); overflow: hidden; }}
+/* Login card */
+.srm-card        {{ background: #fff; border-radius: 4px; box-shadow: 0 2px 18px rgba(0,0,0,0.13); overflow: hidden; max-width: 480px; margin: 28px auto 0 auto; }}
 .srm-card-header {{ background: #3a80c0; color: #fff; font-size: 1.05rem; font-weight: 600; padding: 14px 22px; text-align: center; letter-spacing: 0.2px; }}
 
 /* Input field container label */
@@ -215,7 +210,7 @@ input[placeholder="srm-netid"]::placeholder,
 input[placeholder="srm-password"]::placeholder,
 input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; }}
 
-/* Captcha "image" display */
+/* Captcha display */
 .srm-captcha-img {{
     background: #f5f5f5;
     border: 1px solid #ced4da;
@@ -240,14 +235,6 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
     filter: drop-shadow(0.5px 0.5px 0 rgba(0,0,0,0.2));
     user-select: none;
     padding: 0 6px;
-}}
-.srm-captcha-reload {{
-    display: flex; align-items: center; justify-content: center;
-    width: 42px; height: 42px;
-    border: 1px solid #ced4da;
-    border-radius: 4px;
-    background: #f5f5f5;
-    cursor: pointer; flex-shrink: 0;
 }}
 
 /* Forgot password */
@@ -318,48 +305,28 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
 </style>
 """, unsafe_allow_html=True)
 
-    # ── SRM Header Logo ──
+    # ── Header: small logo + institution name only ──
     st.markdown(f"""
 <div class="srm-header">
     <img src="{COLLEGE_LOGO_URL}"
          class="srm-logo-img"
-         alt="College Logo"
+         alt="SRM Logo"
          onerror="this.style.display='none'">
-    <div class="srm-brand-block">
-        <div class="srm-brand-name">SRM</div>
-        <div class="srm-brand-sub">ARTS AND SCIENCE COLLEGE</div>
-        <div class="srm-brand-tag">CS Department — AI Assistant Portal</div>
-    </div>
+    <div class="srm-inst-name">SRM Institute of Science and Technology</div>
 </div>
 """, unsafe_allow_html=True)
 
-    # ── Two-column body ──
-    col_left, col_right = st.columns([1, 1])
-
-    with col_left:
-        st.markdown("""
-<div class="srm-welcome">
-    <p class="srm-dear">Dear Student,</p>
-    <p class="srm-greet">Welcome to <strong>SRMIST STUDENT PORTAL</strong>.</p>
-    <p class="srm-info">
-        You can access the student portal to know your academic details,
-        query uploaded college documents, and get AI-powered answers instantly.
-    </p>
-    <p class="srm-info">
-        Login with your university username and password.
-        If you need an account, please contact your department administrator.
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-    with col_right:
-        st.markdown("""
+    # ── Login card — centered, single column ──
+    st.markdown("""
 <div class="srm-card">
     <div class="srm-card-header">Student Portal — Sign In</div>
 </div>
 """, unsafe_allow_html=True)
 
-        # ── SIGN IN only ──
+    # Center the form using columns trick
+    _, center_col, _ = st.columns([1, 3, 1])
+
+    with center_col:
         if st.session_state.get('captcha_error'):
             st.markdown(
                 '<div class="srm-error">Incorrect captcha answer. '
@@ -368,14 +335,12 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
             )
 
         with st.form("login_form", clear_on_submit=False):
-            # NetID
             st.markdown('<div class="srm-label">Username</div>', unsafe_allow_html=True)
             username = st.text_input(
                 "netid", placeholder="srm-netid",
                 label_visibility="collapsed"
             )
 
-            # Password
             st.markdown('<div class="srm-label">Password</div>', unsafe_allow_html=True)
             password = st.text_input(
                 "password", placeholder="srm-password",
@@ -386,9 +351,8 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
                 unsafe_allow_html=True
             )
 
-            # Captcha
             st.markdown('<div class="srm-label">Captcha</div>', unsafe_allow_html=True)
-            c_input_col, c_img_col, c_reload_col = st.columns([3, 2.2, 0.6])
+            c_input_col, c_img_col, _ = st.columns([3, 2.2, 0.6])
             with c_input_col:
                 captcha_answer = st.number_input(
                     "captcha", min_value=0, max_value=99, step=1,
@@ -399,16 +363,6 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
                 st.markdown(f"""
 <div class="srm-captcha-img">
     <span class="srm-captcha-chars">{a}+{b}=?</span>
-</div>
-""", unsafe_allow_html=True)
-            with c_reload_col:
-                st.markdown("""
-<div class="srm-captcha-reload" title="New question">
-    <svg width="20" height="20" viewBox="0 0 24 24">
-        <path fill="#888" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8
-        c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6
-        6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-    </svg>
 </div>
 """, unsafe_allow_html=True)
 
@@ -464,7 +418,7 @@ def render_onboarding(pg_url: str):
     step  = st.session_state.get('onboard_step', 1)
     steps = [
         ("Welcome!", f"Hi {user['display']}! Welcome to the College AI Assistant. Let's show you around."),
-        ("Chat", "Ask any question about college documents. The AI will search through uploaded PDFs and give accurate answers."),
+        ("Chat", "Ask any question about college documents. The AI will search through uploaded files and give accurate answers."),
         ("Voice Input", "Click the Mic button to speak your question instead of typing. Works on Chrome and Edge."),
         ("Export Answers", "Every AI answer can be saved as a PDF using the button below each response."),
         ("Language Support", "The AI auto-detects your language — ask in English, Tamil, Hindi, or even Tanglish."),
