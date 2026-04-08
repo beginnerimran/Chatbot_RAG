@@ -29,6 +29,7 @@ from auth import (
 )
 from rag import load_semantic_model
 from sidebar import render_sidebar
+from mobile_sidebar import inject_mobile_sidebar
 from chat import render_chat
 from dashboard import render_dashboard
 from ui_components import (
@@ -207,6 +208,11 @@ div[data-testid="stHorizontalBlock"] .nav-inactive > button {
 def main() -> None:
     try:
         setup_page()
+    except Exception:
+        pass
+
+    try:
+        inject_mobile_sidebar()
     except Exception:
         pass
 

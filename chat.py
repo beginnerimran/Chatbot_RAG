@@ -1,11 +1,11 @@
 """
 chat.py — Full chat UI.
 CHANGES:
-  - Removed "Previous conversations saved — use Load History in sidebar." line from welcome card
-  - _source_pdf_download renamed to _source_file_download, now handles all file types:
-      uses get_document_file_info() to fetch correct mime_type for each source file
-      label updated: "Source document(s) — download original file"
-  - "No documents loaded" hint updated to be file-type agnostic
+  - _source_file_download replaced with _render_source_documents:
+      shows only document names as a styled read-only list.
+      No download buttons, no file-blob fetching, no re-upload messages.
+  - Removed: get_document_file_info and has_file_blob imports (no longer needed here).
+  - All other logic (export, confidence, excerpts, follow-up chips) unchanged.
 """
 
 import html as _html
@@ -21,8 +21,7 @@ from auth import check_permission
 from config import SUGGESTIONS
 from database import (
     load_all_documents_from_db, log_query, save_chat_message,
-    save_feedback, check_rate_limit, update_last_active,
-    get_document_file_info, has_file_blob,
+    check_rate_limit, update_last_active,
 )
 from rag import compute_confidence, confidence_html, generate_answer, semantic_search
 
@@ -207,27 +206,12 @@ def _pdf_type():
 
 
 # ─────────────────────────────────────────────
-# ACTION ROW
+# ACTION ROW — Save as PDF only
 # ─────────────────────────────────────────────
 def _action_row(answer: str, msg_key: str, question: str, username: str, pg_url: str):
     mime, ext = _pdf_type()
-
-    c1, c2, c3, _ = st.columns([1.5, 1.8, 2, 4])
+    c1, _ = st.columns([2, 6])
     with c1:
-        if st.button("Helpful", key=f"up_{msg_key}", use_container_width=True):
-            try:
-                save_feedback(pg_url, username, question, answer, 1)
-                st.toast("Thanks for your feedback!")
-            except Exception:
-                pass
-    with c2:
-        if st.button("Not Helpful", key=f"dn_{msg_key}", use_container_width=True):
-            try:
-                save_feedback(pg_url, username, question, answer, -1)
-                st.toast("Thanks — we will improve!")
-            except Exception:
-                pass
-    with c3:
         try:
             st.download_button(
                 label="Save as PDF",
@@ -259,79 +243,47 @@ def _followup_chips(msg_key: str):
 
 
 # ─────────────────────────────────────────────
-# SOURCE FILE DOWNLOAD  (generic — not PDF-only)
+# SOURCE DOCUMENTS — read-only name list
 # ─────────────────────────────────────────────
-def _source_file_download(source_doc_names: list, pg_url: str, key_suffix: str):
-    """Show source document info and download buttons for the original uploaded files.
-
-    Uses get_document_file_info() to retrieve the correct MIME type so non-PDF
-    files download with the right extension and content type.
+def _render_source_documents(source_doc_names: list, key_suffix: str):
+    """
+    Display the names of source documents used to answer the query.
+    Read-only: no download buttons, no file-byte retrieval.
     """
     if not source_doc_names:
         return
 
-    st.markdown("""
-    <div style="margin-top:12px;padding:10px 14px;
-                background:rgba(26,79,160,0.06);
-                border:1px solid rgba(26,79,160,0.18);
-                border-radius:8px;margin-bottom:4px;">
-        <div style="font-size:0.70rem;font-weight:700;color:var(--text-3);
-                    text-transform:uppercase;letter-spacing:0.5px;">
-            📎 Source document(s) — download original file
-        </div>
+    items_html = "".join(
+        f'<div style="display:flex;align-items:center;gap:8px;padding:5px 0;'
+        f'border-bottom:1px solid rgba(26,79,160,0.10);">'
+        f'<span style="font-size:0.80rem;color:var(--text-2);">📄</span>'
+        f'<span style="font-size:0.80rem;color:var(--text-2);word-break:break-word;">'
+        f'{_html.escape(fname)}</span>'
+        f'</div>'
+        for fname in source_doc_names
+    )
+
+    st.markdown(
+        f"""
+<div style="margin-top:12px;padding:10px 14px;
+            background:rgba(26,79,160,0.06);
+            border:1px solid rgba(26,79,160,0.18);
+            border-radius:8px;margin-bottom:4px;">
+    <div style="font-size:0.70rem;font-weight:700;color:var(--text-3);
+                text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+        📎 Source Documents
     </div>
-    """, unsafe_allow_html=True)
-
-    for i, fname in enumerate(source_doc_names):
-        try:
-            short_name = (fname[:40] + "…") if len(fname) > 40 else fname
-
-            # Check blob availability first (avoids loading full BYTEA just to render UI)
-            try:
-                available = has_file_blob(pg_url, fname)
-            except Exception as e:
-                print(f"[chat] has_file_blob error for '{fname}': {e}")
-                available = False
-
-            if available:
-                try:
-                    file_data, file_type, file_mime = get_document_file_info(pg_url, fname)
-                except Exception as e:
-                    print(f"[chat] get_document_file_info error for '{fname}': {e}")
-                    file_data, file_type, file_mime = None, "pdf", "application/pdf"
-
-                if file_data:
-                    st.download_button(
-                        label=f"⬇  {short_name}",
-                        data=file_data,
-                        file_name=fname,
-                        mime=file_mime,
-                        key=f"src_dl_{key_suffix}_{i}",
-                        use_container_width=True,
-                        help=f"Download source file: {fname}",
-                    )
-                else:
-                    st.markdown(
-                        f'<div style="font-size:0.78rem;color:var(--text-3);padding:4px 0;">'
-                        f'📎 {short_name} '
-                        f'<span style="font-size:0.72rem;color:#c0392b;">'
-                        f'(file data unreadable — please re-upload)</span></div>',
-                        unsafe_allow_html=True,
-                    )
-            else:
-                st.markdown(
-                    f'<div style="font-size:0.78rem;color:var(--text-3);padding:6px 0;">'
-                    f'📎 <strong style="color:var(--text-2);">{short_name}</strong> '
-                    f'<span style="font-size:0.72rem;color:var(--text-3);">'
-                    f'(original file not stored — ask Admin/Staff to re-upload this file '
-                    f'to enable source download)</span></div>',
-                    unsafe_allow_html=True,
-                )
-        except Exception as e:
-            print(f"[chat] _source_file_download error for '{fname}': {e}")
+    {items_html}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
-# Keep old name as alias for backward compatibility
+# Keep old name as alias so any external caller won't break
+def _source_file_download(source_doc_names: list, pg_url: str, key_suffix: str):
+    _render_source_documents(source_doc_names, key_suffix)
+
 _source_pdf_download = _source_file_download
 
 
@@ -372,7 +324,7 @@ def render_chat(pg_url: str, api_key: str, model):
         st.session_state.messages       = []
         st.session_state.history_loaded = False
 
-    # Welcome card — no extra hint line
+    # Welcome card
     if not st.session_state.messages:
         st.markdown(f"""
         <div style="text-align:center;padding:48px 20px;">
@@ -432,7 +384,7 @@ def render_chat(pg_url: str, api_key: str, model):
             _action_row(msg.get('content',''), f"{i}_{gen}", prev, user.get('username',''), pg_url)
             src_docs = msg.get('source_docs', [])
             if src_docs:
-                _source_file_download(src_docs, pg_url, f"hist_{i}_{gen}")
+                _render_source_documents(src_docs, f"hist_{i}_{gen}")
             _followup_chips(f"{i}_{gen}")
 
     if not st.session_state.messages:
@@ -590,7 +542,7 @@ def render_chat(pg_url: str, api_key: str, model):
     idx = len(st.session_state.messages) - 1
     _action_row(answer, f"{idx}_{gen}", prompt, user.get('username',''), pg_url)
     if source_doc_names:
-        _source_file_download(source_doc_names, pg_url, f"{idx}_{gen}")
+        _render_source_documents(source_doc_names, f"{idx}_{gen}")
     _followup_chips(f"{idx}_{gen}")
 
     if remaining <= 5:

@@ -16,7 +16,7 @@ DEMOCREDENTIALSNOTE = """
 **Demo Credentials**
 
 | Username  | Password  | Role    |
-|----------|-----------|---------|
+|----------|-----------|---------| 
 | admin    | admin123  | Admin   |
 | staff1   | staff123  | Staff   |
 | student1 | student123| Student |
@@ -66,7 +66,7 @@ def injectcss() -> None:
   --text-2:    #3d5275;
   --text-3:    #6b82a0;
   --card-bg:   #ffffff;
-  --input-bg:  #f7f9fc;
+  --input-bg:  #ffffff;
   --blue:      #1a4fa0;
   --blue-2:    #2563c0;
   --blue-dim:  rgba(26,79,160,0.08);
@@ -90,43 +90,26 @@ html, body, .stApp {
 footer { visibility: hidden; }
 [data-testid="stToolbar"] { visibility: hidden; }
 
-/* Sidebar: always visible and stable on all devices.
-   The collapsedControl button MUST remain visible so users can
-   re-open the sidebar on small screens — do NOT hide it. */
+/* Sidebar collapse button — hidden; mobile uses floating toggle from mobile_sidebar.py */
 [data-testid="stSidebarCollapseButton"] { display: none !important; }
+[data-testid="collapsedControl"]        { display: none !important; }
 
-/* Desktop: sidebar always open and sized */
+/* Desktop (≥992px): sidebar always open and fixed */
 @media (min-width: 992px) {
   [data-testid="stSidebar"] {
     min-width: 260px !important;
     max-width: 320px !important;
-  }
-}
-/* Mobile: sidebar starts collapsed, revealed via hamburger drawer */
-@media (max-width: 991px) {
-  [data-testid="stSidebar"] {
-    min-width: 0 !important;
-    max-width: 85vw !important;
-  }
-}
-
-/* Collapsed-control (hamburger) — visible and styled on mobile */
-[data-testid="collapsedControl"] {
-  display: flex !important;
-  visibility: visible !important;
-  background: var(--blue) !important;
-  border-radius: 0 6px 6px 0 !important;
-  padding: 6px !important;
-}
-[data-testid="collapsedControl"] svg { fill: #ffffff !important; }
-
-/* On desktop (≥992px) sidebar is always open — no need for the hamburger */
-@media (min-width: 992px) {
-  [data-testid="collapsedControl"] { display: none !important; }
-  section[data-testid="stSidebar"] {
+    position: relative !important;
     transform: none !important;
     visibility: visible !important;
-    left: 0 !important;
+  }
+}
+
+/* Mobile (<992px): sidebar hidden by default; mobile_sidebar.py handles open/close */
+@media (max-width: 991px) {
+  [data-testid="stSidebar"] {
+    min-width: 270px !important;
+    max-width: 85vw !important;
   }
 }
 
@@ -166,44 +149,153 @@ footer { visibility: hidden; }
   color: #ffffff !important;
 }
 
-/* Sidebar regular buttons */
-[data-testid="stSidebar"] .stButton button {
+/* ── ALL BUTTONS — white background, black text, no hover/active effects ── */
+
+/* Regular buttons — main content */
+.stButton > button,
+.stFormSubmitButton > button {
+  background: #ffffff !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
+  border: 1px solid #d0dbef !important;
+  border-radius: var(--radius-sm) !important;
+  min-height: 44px !important;
+  font-size: 0.88rem !important;
+  box-shadow: none !important;
+  transition: none !important;
+}
+/* Hover — stay identical, no effect */
+.stButton > button:hover,
+.stFormSubmitButton > button:hover {
+  background: #ffffff !important;
+  border-color: #d0dbef !important;
+  box-shadow: none !important;
+  color: #000000 !important;
+}
+/* Active / focus — stay identical, no glow */
+.stButton > button:active,
+.stButton > button:focus,
+.stButton > button:focus-visible,
+.stFormSubmitButton > button:active,
+.stFormSubmitButton > button:focus,
+.stFormSubmitButton > button:focus-visible {
+  background: #ffffff !important;
+  color: #000000 !important;
+  box-shadow: none !important;
+  border: 1px solid #d0dbef !important;
+  outline: none !important;
+}
+
+/* Download buttons — same white/black style */
+.stDownloadButton > button {
+  background: #ffffff !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
+  border: 1px solid #d0dbef !important;
+  border-radius: var(--radius-sm) !important;
+  min-height: 44px !important;
+  font-size: 0.88rem !important;
+  box-shadow: none !important;
+  transition: none !important;
+}
+.stDownloadButton > button:hover {
+  background: #ffffff !important;
+  border-color: #d0dbef !important;
+  box-shadow: none !important;
+  color: #000000 !important;
+}
+.stDownloadButton > button:active,
+.stDownloadButton > button:focus,
+.stDownloadButton > button:focus-visible {
+  background: #ffffff !important;
+  color: #000000 !important;
+  box-shadow: none !important;
+  border: 1px solid #d0dbef !important;
+  outline: none !important;
+}
+
+/* Sidebar regular buttons — white text on dark blue bg */
+[data-testid="stSidebar"] .stButton > button {
   background: rgba(255,255,255,0.15) !important;
   border: 1px solid rgba(255,255,255,0.30) !important;
   color: #ffffff !important;
   font-weight: 600 !important;
+  box-shadow: none !important;
+  transition: none !important;
 }
-[data-testid="stSidebar"] .stButton button:hover {
-  background: rgba(255,255,255,0.28) !important;
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: rgba(255,255,255,0.15) !important;
+  border-color: rgba(255,255,255,0.30) !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
 }
-[data-testid="stSidebar"] .stButton button:active,
-[data-testid="stSidebar"] .stButton button:focus,
-[data-testid="stSidebar"] .stButton button:focus-visible {
-  background: rgba(255,255,255,0.28) !important;
+[data-testid="stSidebar"] .stButton > button:active,
+[data-testid="stSidebar"] .stButton > button:focus,
+[data-testid="stSidebar"] .stButton > button:focus-visible {
+  background: rgba(255,255,255,0.15) !important;
   color: #ffffff !important;
   outline: none !important;
-  border-color: rgba(255,255,255,0.25) !important;
+  border-color: rgba(255,255,255,0.30) !important;
+  box-shadow: none !important;
 }
 
-/* Sidebar Delete button — white bg, black text (consistent with global danger-btn) */
+/* Sidebar download buttons */
+[data-testid="stSidebar"] .stDownloadButton > button {
+  background: rgba(255,255,255,0.15) !important;
+  border: 1px solid rgba(255,255,255,0.30) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transition: none !important;
+}
+[data-testid="stSidebar"] .stDownloadButton > button:hover,
+[data-testid="stSidebar"] .stDownloadButton > button:active,
+[data-testid="stSidebar"] .stDownloadButton > button:focus,
+[data-testid="stSidebar"] .stDownloadButton > button:focus-visible {
+  background: rgba(255,255,255,0.15) !important;
+  color: #ffffff !important;
+  border-color: rgba(255,255,255,0.30) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Danger / Delete buttons — white background, black text */
+.danger-btn .stButton > button {
+  background: #ffffff !important;
+  border: 1px solid #d0dbef !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+  transition: none !important;
+}
+.danger-btn .stButton > button:hover,
+.danger-btn .stButton > button:active,
+.danger-btn .stButton > button:focus,
+.danger-btn .stButton > button:focus-visible {
+  background: #ffffff !important;
+  border-color: #d0dbef !important;
+  color: #000000 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Sidebar Delete button */
 [data-testid="stSidebar"] .danger-btn .stButton > button {
   background: #ffffff !important;
   border: 1px solid #d0dbef !important;
   color: #000000 !important;
   font-weight: 600 !important;
+  box-shadow: none !important;
+  transition: none !important;
 }
-[data-testid="stSidebar"] .danger-btn .stButton > button:hover {
-  background: #f0f4fa !important;
-  border-color: #b8c9e0 !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
-  color: #000000 !important;
-}
+[data-testid="stSidebar"] .danger-btn .stButton > button:hover,
 [data-testid="stSidebar"] .danger-btn .stButton > button:active,
 [data-testid="stSidebar"] .danger-btn .stButton > button:focus,
 [data-testid="stSidebar"] .danger-btn .stButton > button:focus-visible {
-  background: #f0f4fa !important;
+  background: #ffffff !important;
+  border-color: #d0dbef !important;
   color: #000000 !important;
   outline: none !important;
+  box-shadow: none !important;
 }
 
 /* ── Sidebar component classes ─────────────────────────── */
@@ -282,7 +374,7 @@ footer { visibility: hidden; }
   color: #3d5275 !important;
 }
 
-/* Sidebar stat cards — white bg, dark text (readable on any background) */
+/* Sidebar stat cards — white bg, dark text */
 [data-testid="stSidebar"] .stat-card {
   background: #ffffff !important;
   border: 1px solid rgba(255,255,255,0.50) !important;
@@ -330,10 +422,6 @@ footer { visibility: hidden; }
   border: 2px dashed rgba(255,255,255,0.40) !important;
   border-radius: 8px !important;
 }
-[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"]:hover {
-  background: rgba(255,255,255,0.14) !important;
-  border-color: rgba(255,255,255,0.65) !important;
-}
 [data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] small,
 [data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] p {
   color: rgba(255,255,255,0.75) !important;
@@ -346,14 +434,11 @@ footer { visibility: hidden; }
   color: #ffffff !important;
   font-weight: 600 !important;
   border-radius: 6px !important;
-}
-[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneButton"]:hover,
-[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneButton"] button:hover {
-  background: rgba(255,255,255,0.32) !important;
-  border-color: #ffffff !important;
+  box-shadow: none !important;
+  transition: none !important;
 }
 
-/* Sidebar expander (Documents accordion) — white bg, dark text, no black on click */
+/* Sidebar expander — white bg, dark text */
 [data-testid="stSidebar"] [data-testid="stExpander"] {
   background: #ffffff !important;
   border: 1px solid rgba(255,255,255,0.30) !important;
@@ -365,13 +450,11 @@ footer { visibility: hidden; }
   color: #1a2640 !important;
   font-weight: 700 !important;
 }
-[data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:hover {
-  background: #f0f4fa !important;
-}
+[data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:hover,
 [data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:active,
 [data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:focus,
 [data-testid="stSidebar"] [data-testid="stExpander"] [data-baseweb="accordion"] button:focus-visible {
-  background: #f0f4fa !important;
+  background: #ffffff !important;
   color: #1a2640 !important;
   outline: none !important;
   box-shadow: none !important;
@@ -379,40 +462,38 @@ footer { visibility: hidden; }
 [data-testid="stSidebar"] [data-testid="stExpander"] svg {
   fill: #1a2640 !important;
 }
-/* All text content inside the sidebar expander should be dark */
 [data-testid="stSidebar"] [data-testid="stExpander"] div,
 [data-testid="stSidebar"] [data-testid="stExpander"] span,
 [data-testid="stSidebar"] [data-testid="stExpander"] p {
   color: #1a2640 !important;
 }
 
-/* Sidebar selectbox — visible on dark blue background */
+/* ── Category selectbox in sidebar — white bg, black text ── */
 [data-testid="stSidebar"] .stSelectbox label {
   color: rgba(255,255,255,0.85) !important;
 }
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
-  background: rgba(255,255,255,0.15) !important;
-  border: 1.5px solid rgba(255,255,255,0.45) !important;
+  background: #ffffff !important;
+  border: 1.5px solid rgba(255,255,255,0.60) !important;
   border-radius: 8px !important;
   min-height: 40px !important;
 }
-/* Wildcard ensures selected value, placeholder, and arrow are all white */
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"],
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] *,
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] span,
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] div,
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] p {
-  color: #ffffff !important;
+  color: #1a2640 !important;
 }
 [data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] svg,
-[data-testid="stSidebar"] .stSelectbox svg { fill: #ffffff !important; }
+[data-testid="stSidebar"] .stSelectbox svg { fill: #1a2640 !important; }
 /* Dropdown options list */
-[data-baseweb="popover"] [role="listbox"] { background: #1a3a7a !important; }
-[data-baseweb="popover"] [role="option"]  { background: #1a3a7a !important; color: #ffffff !important; }
+[data-baseweb="popover"] [role="listbox"] { background: #ffffff !important; }
+[data-baseweb="popover"] [role="option"]  { background: #ffffff !important; color: #1a2640 !important; }
 [data-baseweb="popover"] [role="option"]:hover,
-[data-baseweb="popover"] [aria-selected="true"] { background: #2563c0 !important; color: #ffffff !important; }
+[data-baseweb="popover"] [aria-selected="true"] { background: var(--blue-dim) !important; color: #1a2640 !important; }
 
-/* Main content: make sure expanders and markdown use dark text */
+/* Main content: expanders */
 [data-testid="stExpander"] {
   color: var(--text) !important;
   background: var(--bg-2) !important;
@@ -422,7 +503,7 @@ footer { visibility: hidden; }
   overflow: hidden !important;
 }
 
-/* Expander header (fix the black bar) */
+/* Expander header */
 [data-testid="stExpander"] [data-baseweb="accordion"] {
   background: var(--bg-2) !important;
   color: var(--text) !important;
@@ -435,18 +516,18 @@ footer { visibility: hidden; }
   font-weight: 600 !important;
   font-size: 0.90rem !important;
   padding: 10px 16px !important;
+  transition: none !important;
 }
-[data-testid="stExpander"] [data-baseweb="accordion"] button:hover {
-  background: #e2e8f5 !important;
-}
+[data-testid="stExpander"] [data-baseweb="accordion"] button:hover,
 [data-testid="stExpander"] [data-baseweb="accordion"] button:focus,
 [data-testid="stExpander"] [data-baseweb="accordion"] button:active,
 [data-testid="stExpander"] [data-baseweb="accordion"] button:focus-visible {
+  background: var(--bg-2) !important;
   outline: none !important;
   box-shadow: none !important;
-  background: #dde6f7 !important;
   color: var(--text) !important;
 }
+
 /* Global: prevent any expander accordion button from going black */
 [data-baseweb="accordion"] button:active,
 [data-baseweb="accordion"] button:focus-visible {
@@ -561,12 +642,49 @@ footer { visibility: hidden; }
   color: var(--text);
 }
 
+/* ── Chat input — white bg, blue border, grey placeholder ── */
+[data-testid="stChatInput"] {
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stChatInput"] textarea {
+  background: #ffffff !important;
+  border: 1.5px solid var(--blue) !important;
+  color: var(--text) !important;
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stChatInput"] textarea:focus {
+  border-color: var(--blue-2) !important;
+  box-shadow: 0 0 0 2px var(--blue-dim) !important;
+  outline: none !important;
+}
+[data-testid="stChatInput"] textarea::placeholder {
+  color: var(--text-3) !important;
+  opacity: 1 !important;
+  font-weight: 400 !important;
+}
+/* Chat input send button — white/black */
+[data-testid="stChatInput"] button {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid #d0dbef !important;
+  box-shadow: none !important;
+  transition: none !important;
+}
+[data-testid="stChatInput"] button:hover,
+[data-testid="stChatInput"] button:active,
+[data-testid="stChatInput"] button:focus {
+  background: #ffffff !important;
+  color: #000000 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 /* Inputs and select boxes */
 .stTextInput > div > div > input,
 .stTextArea > div > div > textarea,
 .stNumberInput > div > div > input,
 .stSelectbox > div > div > div {
-  background: var(--input-bg) !important;
+  background: #ffffff !important;
   border: 1px solid var(--border-2) !important;
   color: var(--text) !important;
   border-radius: var(--radius-sm) !important;
@@ -581,7 +699,15 @@ footer { visibility: hidden; }
   box-shadow: 0 0 0 2px var(--blue-dim) !important;
 }
 
-/* Password eye toggle (make visible everywhere) */
+/* Placeholder text for all inputs/textareas */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3) !important;
+  font-weight: 400 !important;
+  opacity: 1 !important;
+}
+
+/* Password eye toggle */
 [data-testid="stPasswordInput-toggleVisibility"] {
   color: var(--text-2) !important;
   background: transparent !important;
@@ -590,66 +716,12 @@ footer { visibility: hidden; }
 [data-testid="stPasswordInput-toggleVisibility"] svg {
   fill: var(--text-2) !important;
 }
-[data-testid="stPasswordInput-toggleVisibility"]:hover {
-  background: rgba(0,0,0,0.03) !important;
-}
+[data-testid="stPasswordInput-toggleVisibility"]:hover,
 [data-testid="stPasswordInput-toggleVisibility"]:focus,
 [data-testid="stPasswordInput-toggleVisibility"]:active {
+  background: transparent !important;
   outline: none !important;
   box-shadow: none !important;
-  background: rgba(0,0,0,0.05) !important;
-}
-
-/* Primary buttons (all pages) — white background, black text */
-.stButton > button,
-.stFormSubmitButton > button {
-  background: #ffffff !important;
-  color: #000000 !important;
-  font-weight: 600 !important;
-  border: 1px solid #d0dbef !important;
-  border-radius: var(--radius-sm) !important;
-  min-height: 44px !important;
-  font-size: 0.88rem !important;
-}
-.stButton > button:hover,
-.stFormSubmitButton > button:hover {
-  background: #f0f4fa !important;
-  border-color: #b8c9e0 !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
-  color: #000000 !important;
-}
-
-/* Prevent ugly black colour on click/focus */
-.stButton > button:active,
-.stButton > button:focus,
-.stButton > button:focus-visible,
-.stFormSubmitButton > button:active,
-.stFormSubmitButton > button:focus,
-.stFormSubmitButton > button:focus-visible {
-  background: #f0f4fa !important;
-  color: #000000 !important;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.10) !important;
-  border: 1px solid #b8c9e0 !important;
-  outline: none !important;
-}
-
-/* Sidebar buttons active state */
-[data-testid="stSidebar"] .stButton > button:active,
-[data-testid="stSidebar"] .stButton > button:focus,
-[data-testid="stSidebar"] .stButton > button:focus-visible {
-  background: rgba(255,255,255,0.28) !important;
-  color: #ffffff !important;
-  outline: none !important;
-  border-color: rgba(255,255,255,0.25) !important;
-}
-
-/* Download buttons */
-.stDownloadButton > button:active,
-.stDownloadButton > button:focus,
-.stDownloadButton > button:focus-visible {
-  background: linear-gradient(135deg, #1a4fa0, #2563c0) !important;
-  color: #ffffff !important;
-  outline: none !important;
 }
 
 /* Divider */
@@ -659,7 +731,7 @@ footer { visibility: hidden; }
   margin: 12px 0;
 }
 
-/* Tabs: Chat / Docs / Dashboard / Users / Account */
+/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
   gap: 4px !important;
   border-bottom: 2px solid var(--border) !important;
@@ -680,57 +752,12 @@ footer { visibility: hidden; }
   font-weight: 600 !important;
 }
 
-/* Bottom mobile nav */
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: var(--blue);
-  border-top: 1px solid rgba(255,255,255,0.15);
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  padding: 6px 0;
-  z-index: 9999;
-  box-shadow: 0 -4px 20px rgba(26,79,160,0.25);
-}
-.bottom-nav-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 5px 2px;
-  font-size: 0.55rem;
-  color: rgba(255,255,255,0.65);
-  cursor: pointer;
-  border: none;
-  background: none;
-  font-family: Inter, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.bottom-nav-btn .nav-icon {
-  font-size: 1.2rem;
-}
-.bottom-nav-btn.active {
-  color: #ffffff;
-}
-@media (min-width: 768px) {
-  .bottom-nav { display: none !important; }
-}
-
 /* Notifications list */
 .notif-item {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 0.83rem;
   background: #ffffff;
-  color: var(--text);
-}
-.notif-item:hover {
-  background: #f7f9fc;
   color: var(--text);
 }
 .notif-message {
@@ -756,14 +783,6 @@ footer { visibility: hidden; }
   font-family: "JetBrains Mono", monospace;
   font-size: 0.78rem;
   color: #a93226;
-}
-
-/* Light, subtle placeholder text for all inputs/textareas */
-input::placeholder,
-textarea::placeholder {
-  color: var(--text-3) !important;
-  font-weight: 400 !important;
-  opacity: 0.7 !important;
 }
 
 /* Chat wrapper + labels */
@@ -813,7 +832,6 @@ textarea::placeholder {
 .conf-fill {
   height: 100%;
   border-radius: 99px;
-  transition: width 0.5s ease;
 }
 .conf-high { background: #00c9a7; }
 .conf-medium { background: #f0a500; }
@@ -880,12 +898,7 @@ textarea::placeholder {
   font-size: 0.78rem;
   cursor: pointer;
   font-family: Inter, sans-serif;
-  transition: background 0.15s, border-color 0.15s;
   user-select: none;
-}
-.followup-chip:hover {
-  background: var(--blue-dim);
-  border-color: var(--blue);
 }
 
 /* Typing indicator dots */
@@ -934,35 +947,13 @@ textarea::placeholder {
   font-size: 0.85rem;
   margin: 6px 0;
 }
-/* Danger / Delete buttons — white background, black text */
-.danger-btn .stButton > button {
-  background: #ffffff !important;
-  border: 1px solid #d0dbef !important;
-  color: #000000 !important;
-  font-weight: 600 !important;
-}
-.danger-btn .stButton > button:hover {
-  background: #f0f4fa !important;
-  border-color: #b8c9e0 !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
-  color: #000000 !important;
-}
-.danger-btn .stButton > button:active,
-.danger-btn .stButton > button:focus,
-.danger-btn .stButton > button:focus-visible {
-  background: #f0f4fa !important;
-  border-color: #b8c9e0 !important;
-  color: #000000 !important;
-  outline: none !important;
-  box-shadow: none !important;
-}
 </style>
         """,
         unsafe_allow_html=True,
     )
-# Backwards‑compat aliases for old names used in app.py/auth.py
+
+# Backwards-compat aliases for old names used in app.py/auth.py
 def setup_page() -> None:
-    # old name, just call new one
     return setuppage()
 
 SESSION_TIMEOUT_MINUTES = SESSIONTIMEOUTMINUTES
