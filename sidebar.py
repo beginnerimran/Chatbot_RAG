@@ -1,26 +1,24 @@
 """
-sidebar.py — Sidebar: user info, status, upload with category, doc list, stats, controls.
+sidebar.py — Sidebar: user info, status, upload with category, stats, controls.
 CHANGES:
-  - File uploader now accepts PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PNG, JPG, JPEG
-  - Uses extract_text_from_file() instead of extract_text_from_pdf()
-  - Detects file_type and mime_type per file and stores them in DB
-  - Per-file try/except: failures are reported per file; batch continues
-  - Label is generic (not "PDF files")
+  - Documents section removed completely (docs tab is enough)
+  - Category selectbox styled with white background + black text so it is readable
+  - File uploader accepts PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PNG, JPG, JPEG
+  - Per-file try/except: failures reported per file; batch continues
 """
 
 import streamlit as st
 
 from auth import check_permission
 from database import (
-    clear_chat_history, delete_document, get_document_list,
+    clear_chat_history,
     get_db_connection, get_stats, load_chat_history,
-    save_document_to_db, update_user_language,
+    save_document_to_db,
     ext_from_filename, mime_for_ext,
 )
 from rag import OCR_AVAILABLE, extract_text_from_file
 
 
-# Accepted file types for the uploader
 _ACCEPTED_TYPES = [
     "pdf", "docx", "doc",
     "xlsx", "xls", "csv",
@@ -34,7 +32,7 @@ def render_sidebar(pg_url: str, api_key: str, model):
     role = user['role']
 
     with st.sidebar:
-        # User card
+        # ── User card ──
         st.markdown(f"""
         <div class="user-card">
             <div class="user-card-label">Signed in as</div>
@@ -43,7 +41,7 @@ def render_sidebar(pg_url: str, api_key: str, model):
         </div>
         """, unsafe_allow_html=True)
 
-        # Status
+        # ── Status dots ──
         try:
             conn_test = get_db_connection(pg_url)
             db_ok     = conn_test is not None
@@ -63,9 +61,31 @@ def render_sidebar(pg_url: str, api_key: str, model):
 
         st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
-        # Upload — Admin/Staff only
+        # ── Upload — Admin/Staff only ──
         if check_permission(role, "upload"):
             st.markdown("**Upload Documents**")
+
+            # Category selectbox — white background, black text so it is readable on dark sidebar
+            st.markdown("""
+<style>
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
+    background: #ffffff !important;
+    border: 1.5px solid rgba(255,255,255,0.60) !important;
+    border-radius: 8px !important;
+    min-height: 40px !important;
+}
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"],
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] *,
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] span,
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] div,
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] p {
+    color: #1a2640 !important;
+}
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] svg,
+[data-testid="stSidebar"] .stSelectbox svg { fill: #1a2640 !important; }
+</style>
+""", unsafe_allow_html=True)
+
             cat_names = ["Admission", "Exam", "General", "Rules", "Timetable"]
             if "upload_category" not in st.session_state:
                 st.session_state["upload_category"] = "Admission"
@@ -89,7 +109,6 @@ def render_sidebar(pg_url: str, api_key: str, model):
                     for uploaded_file in uploaded_files:
                         fname = uploaded_file.name
                         try:
-                            # Read raw bytes
                             try:
                                 file_bytes = uploaded_file.read()
                             except Exception as read_err:
@@ -109,11 +128,9 @@ def render_sidebar(pg_url: str, api_key: str, model):
                                 failed.append(fname)
                                 continue
 
-                            # Detect type info
                             file_ext  = ext_from_filename(fname)
                             file_mime = mime_for_ext(file_ext)
 
-                            # Extract text chunks
                             with st.spinner(f"Processing {fname}..."):
                                 try:
                                     chunks, used_ocr = extract_text_from_file(file_bytes, fname)
@@ -127,11 +144,9 @@ def render_sidebar(pg_url: str, api_key: str, model):
                                     continue
 
                             if not chunks:
-                                # extract_text_from_file already showed a user message
                                 failed.append(fname)
                                 continue
 
-                            # Generate embeddings
                             try:
                                 embeddings = model.encode(
                                     chunks,
@@ -147,7 +162,6 @@ def render_sidebar(pg_url: str, api_key: str, model):
                                 failed.append(fname)
                                 continue
 
-                            # Save to DB
                             try:
                                 saved = save_document_to_db(
                                     pg_url, fname, user['username'],
@@ -174,7 +188,6 @@ def render_sidebar(pg_url: str, api_key: str, model):
                                 failed.append(fname)
 
                         except Exception as outer_err:
-                            # Catch-all so one bad file never crashes the whole batch
                             print(f"[sidebar] Unexpected error for '{fname}': {outer_err}")
                             st.error(
                                 f"'{fname}': An unexpected error occurred. "
@@ -182,7 +195,6 @@ def render_sidebar(pg_url: str, api_key: str, model):
                             )
                             failed.append(fname)
 
-                    # Batch summary
                     if succeeded and failed:
                         st.info(
                             f"{len(succeeded)} file(s) saved. "
@@ -200,77 +212,8 @@ def render_sidebar(pg_url: str, api_key: str, model):
 
             st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
-        # Document list — hidden for students
-        if role != 'student':
-            try:
-                docs      = get_document_list(pg_url)
-                doc_count = len(docs) if docs else 0
-            except Exception:
-                docs, doc_count = [], 0
-
-            with st.expander(f"Documents ({doc_count})", expanded=False):
-                if docs:
-                    for doc in docs:
-                        cat   = doc.get('category', 'General')
-                        ocr_b = ' · OCR' if doc['used_ocr'] else ''
-                        fname = doc['filename']
-                        display_name = (fname[:32] + '…') if len(fname) > 32 else fname
-                        st.markdown(
-                            f"""<div style="
-                                background: #ffffff;
-                                border: 1px solid #d0dbef;
-                                border-radius: 7px;
-                                padding: 9px 12px;
-                                margin-bottom: 6px;
-                                word-break: break-word;
-                                overflow-wrap: break-word;
-                                white-space: normal;
-                                min-width: 0;
-                            ">
-                                <div style="
-                                    font-size: 0.82rem;
-                                    font-weight: 700;
-                                    color: #1a2640;
-                                    margin-bottom: 4px;
-                                    word-break: break-word;
-                                    overflow-wrap: anywhere;
-                                    white-space: normal;
-                                    line-height: 1.4;
-                                    letter-spacing: 0.01em;
-                                ">
-                                    {display_name}
-                                </div>
-                                <div style="
-                                    font-size: 0.68rem;
-                                    color: #6b82a0;
-                                    font-weight: 500;
-                                ">
-                                    {doc['chunk_count']} chunks &middot; {cat}{ocr_b}
-                                </div>
-                            </div>""",
-                            unsafe_allow_html=True
-                        )
-                        if check_permission(role, "delete"):
-                            st.markdown('<div class="danger-btn">', unsafe_allow_html=True)
-                            try:
-                                clicked = st.button("Delete", key=f"del_{doc['id']}", use_container_width=True)
-                            except Exception:
-                                clicked = False
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            if clicked:
-                                try:
-                                    if delete_document(pg_url, doc['id']):
-                                        st.session_state.docs_loaded = False
-                                        st.rerun()
-                                except Exception as del_err:
-                                    print(f"[sidebar] Delete failed: {del_err}")
-                                    st.error("Failed to delete document. Please try again.")
-                else:
-                    st.info("No documents uploaded yet.")
-
-        # Admin stats
+        # ── Admin stats ──
         if check_permission(role, "view_stats"):
-            st.markdown("<hr class='divider'>", unsafe_allow_html=True)
             try:
                 stats = get_stats(pg_url)
             except Exception:
@@ -283,10 +226,9 @@ def render_sidebar(pg_url: str, api_key: str, model):
                     <div class="stat-card"><div class="stat-num">{stats.get('users',0)}</div><div class="stat-lbl">Users</div></div>
                 </div>
                 """, unsafe_allow_html=True)
+            st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
-        st.markdown("<hr class='divider'>", unsafe_allow_html=True)
-
-        # History controls
+        # ── History controls ──
         if st.button("Load Chat History", use_container_width=True):
             try:
                 rows = load_chat_history(pg_url, user['username'], limit=40)

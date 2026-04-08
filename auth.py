@@ -1,10 +1,9 @@
 """
 auth.py — Auth, RBAC, session tokens, session timeout, login UI.
 CHANGES:
-  - College logo URL set to fsh.srmrmp.edu.in logo
-  - Logo is small (44px), neat, inline with title
+  - Logo ~5x larger (height:96px), white background container so it is clearly visible
   - Header shows only "SRM Institute of Science and Technology" — no subtitle, no tagline
-  - Left-column promotional/welcome text removed; login form is centered & compact
+  - Demo Credentials section removed completely
   - All other auth logic unchanged
 """
 
@@ -15,7 +14,7 @@ from datetime import datetime
 
 import streamlit as st
 
-from config import DEMO_CREDENTIALS_NOTE, SESSION_TIMEOUT_MINUTES
+from config import SESSION_TIMEOUT_MINUTES
 from database import db_authenticate, get_db_connection, mark_onboarded
 
 
@@ -109,7 +108,7 @@ _ICON_LOCK_BTN = (
     "2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z'/%3E%3C/svg%3E"
 )
 
-# ── College logo — small and neat ──
+# ── College logo ──
 COLLEGE_LOGO_URL = "https://fsh.srmrmp.edu.in/wp-content/uploads/2025/07/fsh-logo.png"
 
 
@@ -133,29 +132,41 @@ def render_login(pg_url: str):
 .srm-header {{
     background: #ffffff;
     border-bottom: 1px solid #d8dde8;
-    padding: 14px 32px;
+    padding: 16px 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 20px;
 }}
-/* Small logo — 44px */
-.srm-logo-img {{
-    width: 44px;
-    height: 44px;
-    border-radius: 8px;
-    object-fit: cover;
+
+/* Large logo — white background box, ~5x original prominence */
+.srm-logo-wrap {{
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
-    background: #1a3a7a;
+    border: 1px solid #d8dde8;
 }}
-/* Institution name only — no subtitle */
+.srm-logo-img {{
+    height: 96px;          /* ~2x the text line height; effectively 5x the old 44px thumbnail */
+    width: auto;
+    max-width: 220px;
+    object-fit: contain;
+    display: block;
+}}
+
+/* Institution name — scales proportionally with logo */
 .srm-inst-name {{
-    font-size: 1.15rem;
+    font-size: 1.35rem;
     font-weight: 800;
     color: #1a3a7a;
     letter-spacing: 0.2px;
     font-family: 'Inter', sans-serif;
-    line-height: 1.2;
+    line-height: 1.25;
+    max-width: 340px;
 }}
 
 /* Page content padding */
@@ -241,26 +252,29 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
 .srm-forgot {{ text-align: right; font-size: 0.8rem; margin-top: -4px; margin-bottom: 6px; }}
 .srm-forgot a {{ color: #3a80c0; text-decoration: none; }}
 
-/* Login button */
+/* Login button — white/black consistent with global theme */
 .stButton > button {{
-    background: #3a80c0 !important;
-    border: none !important;
+    background: #ffffff !important;
+    border: 1px solid #d0dbef !important;
     border-radius: 4px !important;
-    color: #ffffff !important;
+    color: #000000 !important;
     font-size: 0.95rem !important;
     font-weight: 600 !important;
     min-height: 44px !important;
-    padding-left: 20px !important;
-    background-image: url("{_ICON_LOCK_BTN}") !important;
-    background-repeat: no-repeat !important;
-    background-position: calc(50% - 40px) center !important;
-    background-size: 18px !important;
-    transition: background-color 0.2s !important;
 }}
 .stButton > button:hover {{
-    background-color: #2e6dab !important;
-    box-shadow: 0 3px 12px rgba(58,128,192,0.35) !important;
-    transform: none !important;
+    background: #f0f4fa !important;
+    border-color: #b8c9e0 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+    color: #000000 !important;
+}}
+.stButton > button:active,
+.stButton > button:focus,
+.stButton > button:focus-visible {{
+    background: #f0f4fa !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    outline: none !important;
 }}
 
 /* Error box */
@@ -275,43 +289,52 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
     margin-bottom: 10px;
 }}
 
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] {{ border-bottom: 2px solid #e0e6f0 !important; background: transparent !important; }}
-.stTabs [data-baseweb="tab"]      {{ color: #666 !important; font-size: 0.88rem !important; }}
-.stTabs [aria-selected="true"]    {{ color: #3a80c0 !important; border-bottom: 2px solid #3a80c0 !important; font-weight: 600 !important; }}
-
 /* Checkbox */
 .stCheckbox label {{ font-size: 0.82rem !important; color: #555 !important; }}
 .stCheckbox span  {{ font-size: 0.82rem !important; color: #555 !important; }}
 
 /* Form submit button */
 .stFormSubmitButton > button {{
-    background: #3a80c0 !important;
+    background: #ffffff !important;
     border-radius: 4px !important;
-    border: none !important;
-    color: #fff !important;
+    border: 1px solid #d0dbef !important;
+    color: #000000 !important;
     font-weight: 600 !important;
     font-size: 0.95rem !important;
     min-height: 44px !important;
-    background-image: url("{_ICON_LOCK_BTN}") !important;
-    background-repeat: no-repeat !important;
-    background-position: calc(50% - 36px) center !important;
-    background-size: 16px !important;
 }}
 .stFormSubmitButton > button:hover {{
-    background-color: #2e6dab !important;
-    box-shadow: 0 3px 12px rgba(58,128,192,0.35) !important;
+    background: #f0f4fa !important;
+    border-color: #b8c9e0 !important;
+    color: #000000 !important;
+}}
+.stFormSubmitButton > button:active,
+.stFormSubmitButton > button:focus,
+.stFormSubmitButton > button:focus-visible {{
+    background: #f0f4fa !important;
+    color: #000000 !important;
+    outline: none !important;
+    box-shadow: none !important;
+}}
+
+/* Mobile header: stack logo + title */
+@media (max-width: 600px) {{
+    .srm-header {{ flex-direction: column; gap: 10px; padding: 14px 16px; }}
+    .srm-logo-img {{ height: 72px; }}
+    .srm-inst-name {{ font-size: 1.05rem; text-align: center; }}
 }}
 </style>
 """, unsafe_allow_html=True)
 
-    # ── Header: small logo + institution name only ──
+    # ── Header: large white-background logo + institution name only ──
     st.markdown(f"""
 <div class="srm-header">
-    <img src="{COLLEGE_LOGO_URL}"
-         class="srm-logo-img"
-         alt="SRM Logo"
-         onerror="this.style.display='none'">
+    <div class="srm-logo-wrap">
+        <img src="{COLLEGE_LOGO_URL}"
+             class="srm-logo-img"
+             alt="SRM Logo"
+             onerror="this.style.display='none'">
+    </div>
     <div class="srm-inst-name">SRM Institute of Science and Technology</div>
 </div>
 """, unsafe_allow_html=True)
@@ -323,7 +346,6 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
 </div>
 """, unsafe_allow_html=True)
 
-    # Center the form using columns trick
     _, center_col, _ = st.columns([1, 3, 1])
 
     with center_col:
@@ -367,7 +389,7 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
 """, unsafe_allow_html=True)
 
             remember  = st.checkbox("Keep me signed in for 7 days")
-            submitted = st.form_submit_button("   Login", use_container_width=True)
+            submitted = st.form_submit_button("Login", use_container_width=True)
 
         if submitted:
             if not username or not password:
@@ -394,10 +416,6 @@ input[placeholder="srm-captcha"]::placeholder {{ color: transparent !important; 
                 else:
                     st.error("Invalid username or password.")
                     _init_captcha()
-
-        st.markdown("<hr>", unsafe_allow_html=True)
-        with st.expander("Demo Credentials"):
-            st.markdown(DEMO_CREDENTIALS_NOTE)
 
 
 def restore_session(pg_url: str):
